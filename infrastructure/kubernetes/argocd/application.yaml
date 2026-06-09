@@ -1,0 +1,61 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: healthecosystem-production
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: healthecosystem
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: healthecosystem
+  source:
+    repoURL: https://github.com/healthecosystem/lims.git
+    targetRevision: main
+    path: infrastructure/kubernetes/overlays/production
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: health-platform-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /status
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: healthecosystem-staging
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: healthecosystem
+spec:
+  project: healthecosystem
+  source:
+    repoURL: https://github.com/healthecosystem/lims.git
+    targetRevision: develop
+    path: infrastructure/kubernetes/overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: health-platform-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

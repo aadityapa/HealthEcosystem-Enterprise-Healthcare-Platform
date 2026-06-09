@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: health-platform-config
+  namespace: health-platform
+  labels:
+    app.kubernetes.io/part-of: healthecosystem
+data:
+  NODE_ENV: production
+  JWT_ACCESS_EXPIRY: 15m
+  JWT_REFRESH_EXPIRY: 7d
+  API_GATEWAY_PORT: "3000"
+  IDENTITY_SERVICE_PORT: "3001"
+  TENANT_SERVICE_PORT: "3002"
+  PATIENT_SERVICE_PORT: "3003"
+  LIMS_SERVICE_PORT: "3004"
+  AUDIT_SERVICE_PORT: "3005"
+  IDENTITY_SERVICE_URL: http://identity-service.health-platform.svc.cluster.local:3001
+  TENANT_SERVICE_URL: http://tenant-service.health-platform.svc.cluster.local:3002
+  PATIENT_SERVICE_URL: http://patient-service.health-platform.svc.cluster.local:3003
+  LIMS_SERVICE_URL: http://lims-service.health-platform.svc.cluster.local:3004
+  AUDIT_SERVICE_URL: http://audit-service.health-platform.svc.cluster.local:3005
+  REDIS_URL: redis://redis.health-platform.svc.cluster.local:6379
+  ELASTICSEARCH_URL: http://elasticsearch.health-platform.svc.cluster.local:9200
+  DATABASE_HOST: postgres.health-platform.svc.cluster.local
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: healthecosystem
+  DATABASE_USER: health
+  CORS_ORIGINS: https://admin.healthecosystem.io
+  RATE_LIMIT_POINTS: "120"
+  RATE_LIMIT_DURATION_SEC: "60"
+  LOG_LEVEL: info

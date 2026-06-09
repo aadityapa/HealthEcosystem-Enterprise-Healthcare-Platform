@@ -1,0 +1,229 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+  PNPM_VERSION: "9.15.0"
+
+jobs:
+  lint:
+    name: Lint — ${{ matrix.workspace }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace:
+          - "@health/shared-types"
+          - "@health/logger"
+          - "@health/events"
+          - "@health/validation"
+          - "@health/auth-sdk"
+          - "@health/db"
+          - "@health/design-system"
+          - "@health/web-admin"
+          - "@health/identity-service"
+          - "@health/tenant-service"
+          - "@health/patient-service"
+          - "@health/lims-service"
+          - "@health/audit-service"
+          - "@health/api-gateway"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        if: matrix.workspace == '@health/db' || contains(matrix.workspace, '-service')
+        run: pnpm --filter @health/db generate
+
+      - name: Build workspace dependencies
+        run: pnpm --filter ${{ matrix.workspace }}... build
+
+      - name: Lint
+        run: pnpm --filter ${{ matrix.workspace }} lint
+        continue-on-error: ${{ matrix.workspace == '@health/shared-types' || matrix.workspace == '@health/logger' || matrix.workspace == '@health/events' || matrix.workspace == '@health/validation' || matrix.workspace == '@health/auth-sdk' || matrix.workspace == '@health/db' }}
+
+  test:
+    name: Test — ${{ matrix.workspace }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace:
+          - "@health/identity-service"
+          - "@health/tenant-service"
+          - "@health/patient-service"
+          - "@health/lims-service"
+          - "@health/audit-service"
+          - "@health/api-gateway"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: health
+          POSTGRES_PASSWORD: health
+          POSTGRES_DB: healthecosystem
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U health -d healthecosystem"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://health:health@localhost:5432/healthecosystem?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-test-jwt-secret-with-256-bits-minimum-length
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @health/db generate
+
+      - name: Build workspace dependencies
+        run: pnpm --filter ${{ matrix.workspace }}... build
+
+      - name: Test
+        run: pnpm --filter ${{ matrix.workspace }} test
+
+  build:
+    name: Build — ${{ matrix.workspace }}
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - workspace: "@health/shared-types"
+            artifact: packages/shared-types/dist
+          - workspace: "@health/logger"
+            artifact: packages/logger/dist
+          - workspace: "@health/events"
+            artifact: packages/events/dist
+          - workspace: "@health/validation"
+            artifact: packages/validation/dist
+          - workspace: "@health/auth-sdk"
+            artifact: packages/auth-sdk/dist
+          - workspace: "@health/db"
+            artifact: packages/db/dist
+          - workspace: "@health/design-system"
+            artifact: packages/design-system/src
+          - workspace: "@health/web-admin"
+            artifact: apps/web-admin/.next
+          - workspace: "@health/identity-service"
+            artifact: services/identity-service/dist
+          - workspace: "@health/tenant-service"
+            artifact: services/tenant-service/dist
+          - workspace: "@health/patient-service"
+            artifact: services/patient-service/dist
+          - workspace: "@health/lims-service"
+            artifact: services/lims-service/dist
+          - workspace: "@health/audit-service"
+            artifact: services/audit-service/dist
+          - workspace: "@health/api-gateway"
+            artifact: apps/api-gateway/dist
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        if: contains(matrix.artifact, 'services/') || matrix.workspace == '@health/db'
+        run: pnpm --filter @health/db generate
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:3000
+        run: |
+          if [ "${{ matrix.workspace }}" = "@health/design-system" ]; then
+            pnpm --filter @health/design-system type-check
+          else
+            pnpm --filter ${{ matrix.workspace }}... build
+          fi
+
+      - name: Verify build output
+        run: test -e "${{ matrix.artifact }}"
+
+  docker:
+    name: Docker build — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - identity-service
+          - tenant-service
+          - patient-service
+          - lims-service
+          - audit-service
+          - api-gateway
+          - web-admin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.service == 'api-gateway' && 'apps/api-gateway/Dockerfile' || matrix.service == 'web-admin' && 'apps/web-admin/Dockerfile' || format('services/{0}/Dockerfile', matrix.service) }}
+          push: false
+          tags: healthecosystem/${{ matrix.service }}:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://localhost:3000
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

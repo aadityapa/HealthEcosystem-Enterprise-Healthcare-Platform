@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: health-platform-staging
+
+namePrefix: stg-
+
+commonLabels:
+  environment: staging
+  app.kubernetes.io/environment: staging
+
+resources:
+  - ../../base
+
+patches:
+  - path: patches/namespace.yaml
+  - path: patches/replicas.yaml
+  - path: patches/resources.yaml
+
+configMapGenerator:
+  - name: health-platform-config
+    behavior: merge
+    literals:
+      - NODE_ENV=staging
+      - LOG_LEVEL=debug
+      - CORS_ORIGINS=https://staging-admin.healthecosystem.io

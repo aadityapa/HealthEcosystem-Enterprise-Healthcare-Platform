@@ -1,0 +1,25 @@
+# DR overlay — second PostgreSQL as streaming replica (local simulation)
+services:
+  postgres-replica:
+    image: postgres:16-alpine
+    container_name: health-postgres-replica
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: health
+      POSTGRES_PASSWORD: health
+      POSTGRES_DB: healthecosystem
+      PGUSER: health
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+    command: >
+      postgres
+      -c hot_standby=on
+      -c primary_conninfo=host=postgres port=5432 user=replicator password=replica
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_replica_data:

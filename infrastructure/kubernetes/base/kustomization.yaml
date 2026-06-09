@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: health-platform
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - deployments/api-gateway.yaml
+  - deployments/identity-service.yaml
+  - deployments/lims-service.yaml
+  - services/api-gateway.yaml
+  - services/identity-service.yaml
+  - services/lims-service.yaml
+  - hpa/api-gateway.yaml
+  - hpa/lims-service.yaml
+
+commonLabels:
+  app.kubernetes.io/managed-by: kustomize
+  app.kubernetes.io/part-of: healthecosystem

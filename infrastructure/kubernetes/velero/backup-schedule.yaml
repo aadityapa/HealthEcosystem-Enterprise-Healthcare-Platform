@@ -1,0 +1,56 @@
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: aws-s3-primary
+  namespace: velero
+  labels:
+    app.kubernetes.io/part-of: healthecosystem
+spec:
+  provider: aws
+  objectStorage:
+    bucket: healthecosystem-velero-backups
+    prefix: ap-south-1
+  config:
+    region: ap-south-1
+    s3ForcePathStyle: "false"
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: health-platform-daily
+  namespace: velero
+  labels:
+    app.kubernetes.io/part-of: healthecosystem
+spec:
+  schedule: "0 2 * * *"
+  template:
+    includedNamespaces:
+      - health-platform-prod
+      - health-platform-staging
+      - istio-system
+      - argocd
+    excludedResources:
+      - events
+      - events.events.k8s.io
+    storageLocation: aws-s3-primary
+    ttl: 720h
+    snapshotVolumes: true
+    volumeSnapshotLocations:
+      - aws-ebs-ap-south-1
+    hooks:
+      resources:
+        - name: pre-backup-hook
+          includedNamespaces:
+            - health-platform-prod
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: lims-service
+          pre:
+            - exec:
+                container: lims-service
+                command:
+                  - /bin/sh
+                  - -c
+                  - "echo pre-backup-$(date -Iseconds) > /tmp/backup-marker"
+                onError: Continue
+                timeout: 30s

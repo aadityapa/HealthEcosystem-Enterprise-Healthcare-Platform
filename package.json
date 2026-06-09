@@ -1,0 +1,42 @@
+{
+  "name": "health-ecosystem",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise Healthcare SaaS Platform — LIMS, EHR, PMS, Billing",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --concurrency=35",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "type-check": "turbo run type-check",
+    "db:generate": "pnpm --filter @health/db generate",
+    "db:migrate": "pnpm --filter @health/db migrate:dev",
+    "db:push": "pnpm --filter @health/db push",
+    "db:seed": "pnpm --filter @health/db seed",
+    "verify:health": "node scripts/verify-platform-health.mjs",
+    "verify:integration": "node scripts/verify-integration.mjs",
+    "verify:tenant-isolation": "node scripts/verify-tenant-isolation.mjs",
+    "verify:billing-accuracy": "node scripts/verify-billing-accuracy.mjs",
+    "verify:abdm-compliance": "node scripts/verify-abdm-compliance.mjs",
+    "verify:device-import": "node scripts/verify-device-import.mjs",
+    "verify:dr-failover": "node scripts/verify-dr-failover.mjs",
+    "verify:security": "node scripts/verify-security.mjs",
+    "verify:workflow-engine": "node scripts/verify-workflow-engine.mjs",
+    "verify:performance": "node scripts/verify-performance.mjs",
+    "verify:golden-workflows": "node scripts/verify-golden-workflows.mjs",
+    "verify:pilot": "node scripts/verify-pilot-readiness.mjs",
+    "verify:all": "node scripts/verify-platform-health.mjs && node scripts/verify-integration.mjs && node scripts/verify-tenant-isolation.mjs && node scripts/verify-billing-accuracy.mjs && node scripts/verify-security.mjs",
+    "clean": "turbo run clean && rimraf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "rimraf": "^6.0.1",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.2"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

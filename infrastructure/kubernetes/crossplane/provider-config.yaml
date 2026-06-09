@@ -1,0 +1,43 @@
+# Crossplane provider configuration stub for AWS infrastructure provisioning.
+# Install providers before applying:
+#   kubectl crossplane install provider crossplane-contrib/provider-aws
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws
+  labels:
+    app.kubernetes.io/part-of: healthecosystem
+spec:
+  package: xpkg.upbound.io/upbound/provider-aws:v1.14.0
+---
+apiVersion: aws.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: healthecosystem-aws
+  labels:
+    app.kubernetes.io/part-of: healthecosystem
+spec:
+  credentials:
+    source: IRSA
+    # IRSA role: arn:aws:iam::<account-id>:role/healthecosystem-crossplane
+---
+# Example managed resource stub — RDS subnet group
+apiVersion: database.aws.upbound.io/v1beta1
+kind: SubnetGroup
+metadata:
+  name: healthecosystem-rds-subnets
+  labels:
+    app.kubernetes.io/part-of: healthecosystem
+spec:
+  forProvider:
+    region: ap-south-1
+    description: HealthEcosystem RDS subnet group (stub)
+    subnetIds:
+      - subnet-aaaaaaaa
+      - subnet-bbbbbbbb
+      - subnet-cccccccc
+    tags:
+      Environment: production
+      Project: healthecosystem
+  providerConfigRef:
+    name: healthecosystem-aws

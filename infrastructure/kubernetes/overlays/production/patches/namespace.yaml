@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: health-platform-prod
+  labels:
+    environment: production
+    app.kubernetes.io/part-of: healthecosystem
+    istio-injection: enabled

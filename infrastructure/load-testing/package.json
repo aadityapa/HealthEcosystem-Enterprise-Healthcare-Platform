@@ -1,0 +1,17 @@
+{
+  "name": "@health/load-testing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "k6 and Gatling load tests for HealthEcosystem",
+  "scripts": {
+    "load:gateway": "k6 run scripts/load/api-gateway.js",
+    "load:gateway:local": "cross-env BASE_URL=http://localhost:3000 k6 run scripts/load/api-gateway.js",
+    "load:lims": "k6 run scripts/load/lims-throughput.js",
+    "load:lims:local": "cross-env BASE_URL=http://localhost:3000 ORDERS_PER_HOUR=3600 k6 run scripts/load/lims-throughput.js",
+    "load:lims:target": "cross-env ORDERS_PER_HOUR=50000 k6 run scripts/load/lims-throughput.js",
+    "load:devices": "k6 run scripts/load/device-messages.js",
+    "load:devices:local": "cross-env BASE_URL=http://localhost:3000 MESSAGES_PER_MIN=600 k6 run scripts/load/device-messages.js",
+    "load:devices:target": "cross-env MESSAGES_PER_MIN=100000 k6 run scripts/load/device-messages.js",
+    "load:all:smoke": "npm run load:gateway:local && npm run load:lims:local && npm run load:devices:local"
+  }
+}

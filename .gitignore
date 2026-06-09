@@ -1,0 +1,17 @@
+node_modules
+dist
+.next
+.turbo
+.env
+.env.local
+.env.*.local
+packages/db/.env
+*.log
+coverage
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+*.tsbuildinfo
+pnpm-lock.yaml.bak
+identity-startup.log

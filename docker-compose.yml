@@ -1,0 +1,1142 @@
+name: healthecosystem
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-service-env: &service-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://health:health@postgres:5432/healthecosystem?schema=public
+  REDIS_URL: redis://redis:6379
+  JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-256-bit-secret}
+  JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-15m}
+  JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-7d}
+  ELASTICSEARCH_URL: http://elasticsearch:9200
+  INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:-change-me-in-production}
+  AUDIT_SERVICE_URL: http://audit-service:3005
+  CORS_ORIGINS: http://localhost:3100,http://web-admin:3100,http://localhost:3110,http://patient-mobile:3110,http://localhost:3120,http://phlebotomist-app:3120,http://localhost:3130,http://partner-portal:3130
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: health-postgres
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_USER: health
+      POSTGRES_PASSWORD: health
+      POSTGRES_DB: healthecosystem
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U health -d healthecosystem"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: health-redis
+    restart: unless-stopped
+    logging: *default-logging
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: health-elasticsearch
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.http.ssl.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      cluster.name: healthecosystem
+      node.name: health-es-01
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: health-clickhouse
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      CLICKHOUSE_DB: analytics
+      CLICKHOUSE_USER: health
+      CLICKHOUSE_PASSWORD: health
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  superset:
+    image: apache/superset:4.0.2
+    container_name: health-superset
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-change-me-superset-secret}
+      SUPERSET_LOAD_EXAMPLES: "no"
+    ports:
+      - "8088:8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    container_name: health-jaeger
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: health-grafana
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3200:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: health-minio
+    restart: unless-stopped
+    logging: *default-logging
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: health
+      MINIO_ROOT_PASSWORD: health
+    ports:
+      - "9001:9001"
+      - "9002:9000"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  identity-service:
+    build:
+      context: .
+      dockerfile: services/identity-service/Dockerfile
+    container_name: health-identity-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      IDENTITY_SERVICE_PORT: 3001
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/auth/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  tenant-service:
+    build:
+      context: .
+      dockerfile: services/tenant-service/Dockerfile
+    container_name: health-tenant-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      TENANT_SERVICE_PORT: 3002
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/api/v1/tenants/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  patient-service:
+    build:
+      context: .
+      dockerfile: services/patient-service/Dockerfile
+    container_name: health-patient-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      PATIENT_SERVICE_PORT: 3003
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      identity-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/api/v1/patients/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  lims-service:
+    build:
+      context: .
+      dockerfile: services/lims-service/Dockerfile
+    container_name: health-lims-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      LIMS_SERVICE_PORT: 3004
+    ports:
+      - "3004:3004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      patient-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3004/api/v1/lims/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  audit-service:
+    build:
+      context: .
+      dockerfile: services/audit-service/Dockerfile
+    container_name: health-audit-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      AUDIT_SERVICE_PORT: 3005
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3005/api/v1/audit/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  device-service:
+    build:
+      context: .
+      dockerfile: services/device-service/Dockerfile
+    container_name: health-device-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      DEVICE_SERVICE_PORT: 3006
+      LIMS_SERVICE_URL: http://lims-service:3004
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-}
+    ports:
+      - "3006:3006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lims-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3006/api/v1/devices/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  master-data-service:
+    build:
+      context: .
+      dockerfile: services/master-data-service/Dockerfile
+    container_name: health-master-data-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      MASTER_DATA_SERVICE_PORT: 3007
+    ports:
+      - "3007:3007"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3007/api/v1/master/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  billing-service:
+    build:
+      context: .
+      dockerfile: services/billing-service/Dockerfile
+    container_name: health-billing-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      BILLING_SERVICE_PORT: 3008
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      CASHFREE_APP_ID: ${CASHFREE_APP_ID:-}
+      CASHFREE_SECRET_KEY: ${CASHFREE_SECRET_KEY:-}
+      PAYU_MERCHANT_KEY: ${PAYU_MERCHANT_KEY:-}
+      PAYU_SALT: ${PAYU_SALT:-}
+      PAYMENT_GATEWAY_TEST_MODE: ${PAYMENT_GATEWAY_TEST_MODE:-true}
+    ports:
+      - "3008:3008"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lims-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3008/api/v1/billing/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: services/inventory-service/Dockerfile
+    container_name: health-inventory-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      INVENTORY_SERVICE_PORT: 3009
+    ports:
+      - "3009:3009"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3009/api/v1/inventory/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  qc-service:
+    build:
+      context: .
+      dockerfile: services/qc-service/Dockerfile
+    container_name: health-qc-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      QC_SERVICE_PORT: 3010
+    ports:
+      - "3010:3010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/api/v1/qc/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  crm-service:
+    build:
+      context: .
+      dockerfile: services/crm-service/Dockerfile
+    container_name: health-crm-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      CRM_SERVICE_PORT: 3011
+    ports:
+      - "3011:3011"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3011/api/v1/crm/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ehr-service:
+    build:
+      context: .
+      dockerfile: services/ehr-service/Dockerfile
+    container_name: health-ehr-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      EHR_SERVICE_PORT: 3012
+    ports:
+      - "3012:3012"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      patient-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3012/api/v1/ehr/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  abdm-service:
+    build:
+      context: .
+      dockerfile: services/abdm-service/Dockerfile
+    container_name: health-abdm-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      ABDM_SERVICE_PORT: 3013
+    ports:
+      - "3013:3013"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      patient-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3013/api/v1/abdm/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  analytics-service:
+    build:
+      context: .
+      dockerfile: services/analytics-service/Dockerfile
+    container_name: health-analytics-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      ANALYTICS_SERVICE_PORT: 3014
+      CLICKHOUSE_URL: http://health:health@clickhouse:8123/analytics
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-}
+    ports:
+      - "3014:3014"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3014/api/v1/analytics/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: services/ai-service/Dockerfile
+    container_name: health-ai-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      AI_SERVICE_PORT: 3015
+    ports:
+      - "3015:3015"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3015/api/v1/ai/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  field-service:
+    build:
+      context: .
+      dockerfile: services/field-service/Dockerfile
+    container_name: health-field-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      FIELD_SERVICE_PORT: 3016
+    ports:
+      - "3016:3016"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3016/api/v1/field/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  radiology-service:
+    build:
+      context: .
+      dockerfile: services/radiology-service/Dockerfile
+    container_name: health-radiology-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      RADIOLOGY_SERVICE_PORT: 3017
+    ports:
+      - "3017:3017"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      patient-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3017/api/v1/radiology/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  hrms-service:
+    build:
+      context: .
+      dockerfile: services/hrms-service/Dockerfile
+    container_name: health-hrms-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      HRMS_SERVICE_PORT: 3018
+    ports:
+      - "3018:3018"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3018/api/v1/hrms/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  marketplace-service:
+    build:
+      context: .
+      dockerfile: services/marketplace-service/Dockerfile
+    container_name: health-marketplace-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      MARKETPLACE_SERVICE_PORT: 3019
+    ports:
+      - "3019:3019"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3019/api/v1/marketplace/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  observability-service:
+    build:
+      context: .
+      dockerfile: services/observability-service/Dockerfile
+    container_name: health-observability-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      OBSERVABILITY_SERVICE_PORT: 3020
+      JAEGER_URL: http://jaeger:16686
+      GRAFANA_URL: http://grafana:3000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    ports:
+      - "3020:3020"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3020/api/v1/observability/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  data-platform-service:
+    build:
+      context: .
+      dockerfile: services/data-platform-service/Dockerfile
+    container_name: health-data-platform-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      DATA_PLATFORM_SERVICE_PORT: 3021
+      AWS_S3_BUCKET: health-ecosystem-lake
+      AWS_S3_ENDPOINT: http://minio:9000
+      AWS_ACCESS_KEY_ID: health
+      AWS_SECRET_ACCESS_KEY: health
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-}
+    ports:
+      - "3021:3021"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3021/api/v1/data/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  workflow-service:
+    build:
+      context: .
+      dockerfile: services/workflow-service/Dockerfile
+    container_name: health-workflow-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      WORKFLOW_SERVICE_PORT: 3022
+    ports:
+      - "3022:3022"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3022/api/v1/workflow/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  dms-service:
+    build:
+      context: .
+      dockerfile: services/dms-service/Dockerfile
+    container_name: health-dms-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      DMS_SERVICE_PORT: 3023
+      AWS_S3_BUCKET: health-ecosystem-docs
+      AWS_S3_ENDPOINT: http://minio:9000
+    ports:
+      - "3023:3023"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3023/api/v1/dms/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  branding-service:
+    build:
+      context: .
+      dockerfile: services/branding-service/Dockerfile
+    container_name: health-branding-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      BRANDING_SERVICE_PORT: 3024
+    ports:
+      - "3024:3024"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3024/api/v1/branding/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  agents-service:
+    build:
+      context: .
+      dockerfile: services/agents-service/Dockerfile
+    container_name: health-agents-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      AGENTS_SERVICE_PORT: 3025
+    ports:
+      - "3025:3025"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3025/api/v1/agents/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  i18n-service:
+    build:
+      context: .
+      dockerfile: services/i18n-service/Dockerfile
+    container_name: health-i18n-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      I18N_SERVICE_PORT: 3026
+    ports:
+      - "3026:3026"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3026/api/v1/i18n/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  security-service:
+    build:
+      context: .
+      dockerfile: services/security-service/Dockerfile
+    container_name: health-security-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      SECURITY_SERVICE_PORT: 3027
+    ports:
+      - "3027:3027"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3027/api/v1/security/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  compliance-service:
+    build:
+      context: .
+      dockerfile: services/compliance-service/Dockerfile
+    container_name: health-compliance-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      COMPLIANCE_SERVICE_PORT: 3028
+    ports:
+      - "3028:3028"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3028/api/v1/compliance/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  customer-success-service:
+    build:
+      context: .
+      dockerfile: services/customer-success-service/Dockerfile
+    container_name: health-customer-success-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      CUSTOMER_SUCCESS_SERVICE_PORT: 3029
+    ports:
+      - "3029:3029"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3029/api/v1/customer-success/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  commercial-service:
+    build:
+      context: .
+      dockerfile: services/commercial-service/Dockerfile
+    container_name: health-commercial-service
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      COMMERCIAL_SERVICE_PORT: 3030
+    ports:
+      - "3030:3030"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3030/api/v1/commercial/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: apps/api-gateway/Dockerfile
+    container_name: health-api-gateway
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      <<: *service-env
+      API_GATEWAY_PORT: 3000
+      IDENTITY_SERVICE_URL: http://identity-service:3001
+      TENANT_SERVICE_URL: http://tenant-service:3002
+      PATIENT_SERVICE_URL: http://patient-service:3003
+      LIMS_SERVICE_URL: http://lims-service:3004
+      AUDIT_SERVICE_URL: http://audit-service:3005
+      DEVICE_SERVICE_URL: http://device-service:3006
+      MASTER_DATA_SERVICE_URL: http://master-data-service:3007
+      BILLING_SERVICE_URL: http://billing-service:3008
+      INVENTORY_SERVICE_URL: http://inventory-service:3009
+      QC_SERVICE_URL: http://qc-service:3010
+      CRM_SERVICE_URL: http://crm-service:3011
+      EHR_SERVICE_URL: http://ehr-service:3012
+      ABDM_SERVICE_URL: http://abdm-service:3013
+      ANALYTICS_SERVICE_URL: http://analytics-service:3014
+      AI_SERVICE_URL: http://ai-service:3015
+      FIELD_SERVICE_URL: http://field-service:3016
+      RADIOLOGY_SERVICE_URL: http://radiology-service:3017
+      HRMS_SERVICE_URL: http://hrms-service:3018
+      MARKETPLACE_SERVICE_URL: http://marketplace-service:3019
+      OBSERVABILITY_SERVICE_URL: http://observability-service:3020
+      DATA_PLATFORM_SERVICE_URL: http://data-platform-service:3021
+      WORKFLOW_SERVICE_URL: http://workflow-service:3022
+      DMS_SERVICE_URL: http://dms-service:3023
+      BRANDING_SERVICE_URL: http://branding-service:3024
+      AGENTS_SERVICE_URL: http://agents-service:3025
+      I18N_SERVICE_URL: http://i18n-service:3026
+      SECURITY_SERVICE_URL: http://security-service:3027
+      COMPLIANCE_SERVICE_URL: http://compliance-service:3028
+      CUSTOMER_SUCCESS_SERVICE_URL: http://customer-success-service:3029
+      COMMERCIAL_SERVICE_URL: http://commercial-service:3030
+      RATE_LIMIT_POINTS: 120
+      RATE_LIMIT_DURATION_SEC: 60
+    ports:
+      - "3000:3000"
+    depends_on:
+      identity-service:
+        condition: service_healthy
+      tenant-service:
+        condition: service_healthy
+      patient-service:
+        condition: service_healthy
+      lims-service:
+        condition: service_healthy
+      audit-service:
+        condition: service_healthy
+      device-service:
+        condition: service_healthy
+      master-data-service:
+        condition: service_healthy
+      billing-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+      qc-service:
+        condition: service_healthy
+      crm-service:
+        condition: service_healthy
+      ehr-service:
+        condition: service_healthy
+      abdm-service:
+        condition: service_healthy
+      analytics-service:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+      field-service:
+        condition: service_healthy
+      radiology-service:
+        condition: service_healthy
+      hrms-service:
+        condition: service_healthy
+      marketplace-service:
+        condition: service_healthy
+      observability-service:
+        condition: service_healthy
+      data-platform-service:
+        condition: service_healthy
+      workflow-service:
+        condition: service_healthy
+      dms-service:
+        condition: service_healthy
+      branding-service:
+        condition: service_healthy
+      agents-service:
+        condition: service_healthy
+      i18n-service:
+        condition: service_healthy
+      security-service:
+        condition: service_healthy
+      compliance-service:
+        condition: service_healthy
+      customer-success-service:
+        condition: service_healthy
+      commercial-service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web-admin:
+    build:
+      context: .
+      dockerfile: apps/web-admin/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3000
+    container_name: health-web-admin
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      NEXT_PUBLIC_API_URL: http://localhost:3000
+    ports:
+      - "3100:3100"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+
+  patient-mobile:
+    build:
+      context: .
+      dockerfile: apps/patient-mobile/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3000
+    container_name: health-patient-mobile
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      NODE_ENV: production
+      PORT: 3110
+      NEXT_PUBLIC_API_URL: http://localhost:3000
+    ports:
+      - "3110:3110"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+
+  phlebotomist-app:
+    build:
+      context: .
+      dockerfile: apps/phlebotomist-app/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3000
+    container_name: health-phlebotomist-app
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      NODE_ENV: production
+      PORT: 3120
+      NEXT_PUBLIC_API_URL: http://localhost:3000
+    ports:
+      - "3120:3120"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+
+  partner-portal:
+    build:
+      context: .
+      dockerfile: apps/partner-portal/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3000
+    container_name: health-partner-portal
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      NODE_ENV: production
+      PORT: 3130
+      NEXT_PUBLIC_API_URL: http://localhost:3000
+    ports:
+      - "3130:3130"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  elasticsearch_data:
+  clickhouse_data:
+  grafana_data:
+  minio_data:

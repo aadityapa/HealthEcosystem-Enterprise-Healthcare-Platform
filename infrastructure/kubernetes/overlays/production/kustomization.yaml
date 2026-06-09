@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: health-platform-prod
+
+namePrefix: prod-
+
+commonLabels:
+  environment: production
+  app.kubernetes.io/environment: production
+
+resources:
+  - ../../base
+
+patches:
+  - path: patches/namespace.yaml
+  - path: patches/replicas.yaml
+  - path: patches/resources.yaml
+  - path: patches/affinity.yaml
+
+configMapGenerator:
+  - name: health-platform-config
+    behavior: merge
+    literals:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+      - CORS_ORIGINS=https://admin.healthecosystem.io,https://portal.healthecosystem.io
+      - RATE_LIMIT_POINTS=300
+      - RATE_LIMIT_DURATION_SEC=60
+
+images:
+  - name: healthecosystem/api-gateway
+    newTag: v1.0.0
+  - name: healthecosystem/identity-service
+    newTag: v1.0.0
+  - name: healthecosystem/lims-service
+    newTag: v1.0.0

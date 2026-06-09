@@ -1,0 +1,18 @@
+# Shared base image for HealthEcosystem Node.js services and apps.
+# Build: docker build -f infrastructure/docker/Dockerfile.base -t healthecosystem/base:node20 .
+FROM node:20-alpine AS base
+
+RUN apk add --no-cache libc6-compat openssl tini
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+ENV NODE_ENV=production
+
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+
+# Workspace manifests for dependency resolution in downstream images.
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
+
+ENTRYPOINT ["/sbin/tini", "--"]

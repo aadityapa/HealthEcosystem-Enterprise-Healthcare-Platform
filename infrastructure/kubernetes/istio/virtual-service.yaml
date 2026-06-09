@@ -1,0 +1,70 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: api-gateway
+  namespace: health-platform-prod
+  labels:
+    app.kubernetes.io/part-of: healthecosystem
+spec:
+  hosts:
+    - api.healthecosystem.io
+    - api-internal.healthecosystem.svc.cluster.local
+  gateways:
+    - healthecosystem-gateway
+    - mesh
+  http:
+    - match:
+        - uri:
+            prefix: /health
+      route:
+        - destination:
+            host: prod-api-gateway.health-platform-prod.svc.cluster.local
+            port:
+              number: 3000
+          weight: 100
+    - match:
+        - uri:
+            prefix: /api/v1
+      route:
+        - destination:
+            host: prod-api-gateway.health-platform-prod.svc.cluster.local
+            subset: stable
+            port:
+              number: 3000
+          weight: 90
+        - destination:
+            host: prod-api-gateway.health-platform-prod.svc.cluster.local
+            subset: canary
+            port:
+              number: 3000
+          weight: 10
+      timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: 5xx,reset,connect-failure,refused-stream
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: lims-service
+  namespace: health-platform-prod
+  labels:
+    app.kubernetes.io/part-of: healthecosystem
+spec:
+  hosts:
+    - prod-lims-service.health-platform-prod.svc.cluster.local
+  http:
+    - match:
+        - uri:
+            prefix: /api/v1/lims
+      route:
+        - destination:
+            host: prod-lims-service.health-platform-prod.svc.cluster.local
+            subset: stable
+          weight: 95
+        - destination:
+            host: prod-lims-service.health-platform-prod.svc.cluster.local
+            subset: canary
+          weight: 5
+      timeout: 15s

@@ -1,0 +1,4558 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["core", "master", "patient", "lims", "audit", "device", "billing", "inventory", "qc", "crm", "ehr", "abdm", "analytics", "ai", "field", "radiology", "hrms", "marketplace", "observability", "data", "workflow", "dms", "branding", "agents", "i18n", "security", "compliance", "customer_success", "commercial"]
+}
+
+// ─── ENUMS ───────────────────────────────────────────────────────────────────
+
+enum TenantTier {
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+  FRANCHISE
+
+  @@schema("core")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CHURNED
+
+  @@schema("core")
+}
+
+enum BranchType {
+  HQ
+  REGIONAL_LAB
+  PROCESSING_LAB
+  COLLECTION_CENTER
+  FRANCHISE
+  CLINIC
+
+  @@schema("core")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  LOCKED
+  PENDING_VERIFICATION
+
+  @@schema("core")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNKNOWN
+
+  @@schema("core")
+}
+
+enum SampleStatus {
+  ORDERED
+  COLLECTED
+  IN_TRANSIT
+  RECEIVED
+  PROCESSING
+  RESULT_PENDING
+  VERIFIED
+  APPROVED
+  REJECTED
+  REPORTED
+  ARCHIVED
+
+  @@schema("lims")
+}
+
+enum OrderStatus {
+  DRAFT
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  REFUNDED
+
+  @@schema("lims")
+}
+
+enum ResultFlag {
+  NORMAL
+  LOW
+  HIGH
+  CRITICAL_LOW
+  CRITICAL_HIGH
+  ABNORMAL
+  PANIC
+
+  @@schema("lims")
+}
+
+enum ConsentType {
+  TREATMENT
+  DATA_SHARING
+  MARKETING
+  ABDM_HIE
+  TELECONSULT
+
+  @@schema("patient")
+}
+
+enum ConsentStatus {
+  PENDING
+  GRANTED
+  REVOKED
+  EXPIRED
+
+  @@schema("patient")
+}
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  RELEASE
+  APPROVE
+  VOID
+
+  @@schema("audit")
+}
+
+enum SessionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+
+  @@schema("core")
+}
+
+// ─── CORE SCHEMA ─────────────────────────────────────────────────────────────
+
+model Tenant {
+  id          String       @id @default(uuid()) @db.Uuid
+  slug        String       @unique @db.VarChar(63)
+  name        String       @db.VarChar(255)
+  tier        TenantTier   @default(PROFESSIONAL)
+  status      TenantStatus @default(TRIAL)
+  settings    Json         @default("{}")
+  dataRegion  String       @default("ap-south-1") @map("data_region") @db.VarChar(32)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  organizations Organization[]
+  users         User[]
+  roles         Role[]
+  branches      Branch[]
+
+  @@map("tenants")
+  @@schema("core")
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  legalName String   @map("legal_name") @db.VarChar(255)
+  tradeName String?  @map("trade_name") @db.VarChar(255)
+  gstin     String?  @db.VarChar(15)
+  pan       String?  @db.VarChar(10)
+  orgType   String   @default("diagnostic") @map("org_type") @db.VarChar(32)
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  branches Branch[]
+
+  @@unique([tenantId, gstin])
+  @@index([tenantId])
+  @@map("organizations")
+  @@schema("core")
+}
+
+model Branch {
+  id                 String     @id @default(uuid()) @db.Uuid
+  tenantId           String     @map("tenant_id") @db.Uuid
+  organizationId     String     @map("organization_id") @db.Uuid
+  parentBranchId     String?    @map("parent_branch_id") @db.Uuid
+  code               String     @db.VarChar(32)
+  name               String     @db.VarChar(255)
+  branchType         BranchType @map("branch_type")
+  address            Json       @default("{}")
+  contact            Json       @default("{}")
+  isCollectionCenter Boolean    @default(false) @map("is_collection_center")
+  isProcessingLab    Boolean    @default(false) @map("is_processing_lab")
+  timezone           String     @default("Asia/Kolkata") @db.VarChar(64)
+  isActive           Boolean    @default(true) @map("is_active")
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  parentBranch Branch?      @relation("BranchHierarchy", fields: [parentBranchId], references: [id])
+  childBranches Branch[]    @relation("BranchHierarchy")
+  userBranches  UserBranch[]
+  userRoles     UserRole[]
+  departments   Department[]
+  franchiseAgreements FranchiseAgreement[] @relation("FranchiseBranch")
+  parentFranchiseAgreements FranchiseAgreement[] @relation("ParentBranch")
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([organizationId])
+  @@map("branches")
+  @@schema("core")
+}
+
+model Department {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(128)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@unique([tenantId, branchId, code])
+  @@index([tenantId])
+  @@map("departments")
+  @@schema("core")
+}
+
+model FranchiseAgreement {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  organizationId    String    @map("organization_id") @db.Uuid
+  franchiseBranchId String    @map("franchise_branch_id") @db.Uuid
+  parentBranchId    String    @map("parent_branch_id") @db.Uuid
+  agreementNumber   String    @map("agreement_number") @db.VarChar(32)
+  revenueSharePct   Decimal?  @map("revenue_share_pct") @db.Decimal(5, 2)
+  canSetPricing     Boolean   @default(false) @map("can_set_pricing")
+  canProcessLocal   Boolean   @default(false) @map("can_process_local")
+  canReleaseReports Boolean   @default(false) @map("can_release_reports")
+  brandingConfig    Json      @default("{}") @map("branding_config")
+  effectiveFrom     DateTime  @map("effective_from") @db.Date
+  effectiveTo       DateTime? @map("effective_to") @db.Date
+  status            String    @default("active") @db.VarChar(32)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  franchiseBranch Branch @relation("FranchiseBranch", fields: [franchiseBranchId], references: [id])
+  parentBranch    Branch @relation("ParentBranch", fields: [parentBranchId], references: [id])
+
+  @@unique([tenantId, agreementNumber])
+  @@index([tenantId])
+  @@map("franchise_agreements")
+  @@schema("core")
+}
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  email        String     @db.VarChar(255)
+  phone        String?    @db.VarChar(20)
+  passwordHash String?    @map("password_hash") @db.VarChar(255)
+  firstName    String     @map("first_name") @db.VarChar(100)
+  lastName     String?    @map("last_name") @db.VarChar(100)
+  status       UserStatus @default(PENDING_VERIFICATION)
+  mfaEnabled   Boolean    @default(false) @map("mfa_enabled")
+  mfaSecret    String?    @map("mfa_secret")
+  lastLoginAt  DateTime?  @map("last_login_at") @db.Timestamptz
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  userRoles    UserRole[]
+  userBranches UserBranch[]
+  sessions     UserSession[]
+  mfaDevices   MfaDevice[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+  @@schema("core")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String?  @map("tenant_id") @db.Uuid
+  code        String   @db.VarChar(64)
+  name        String   @db.VarChar(128)
+  description String?
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant          Tenant?          @relation(fields: [tenantId], references: [id])
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+
+  @@unique([tenantId, code])
+  @@map("roles")
+  @@schema("core")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(128)
+  module      String   @db.VarChar(64)
+  action      String   @db.VarChar(32)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+  @@schema("core")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+  @@schema("core")
+}
+
+model UserRole {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  branchId  String?  @map("branch_id") @db.Uuid
+  grantedAt DateTime @default(now()) @map("granted_at") @db.Timestamptz
+  grantedBy String?  @map("granted_by") @db.Uuid
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role    @relation(fields: [roleId], references: [id])
+  branch Branch? @relation(fields: [branchId], references: [id])
+
+  @@unique([userId, roleId, branchId])
+  @@index([userId])
+  @@map("user_roles")
+  @@schema("core")
+}
+
+model UserBranch {
+  userId    String  @map("user_id") @db.Uuid
+  branchId  String  @map("branch_id") @db.Uuid
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([userId, branchId])
+  @@map("user_branches")
+  @@schema("core")
+}
+
+model UserSession {
+  id           String        @id @default(uuid()) @db.Uuid
+  tenantId     String        @map("tenant_id") @db.Uuid
+  userId       String        @map("user_id") @db.Uuid
+  refreshToken String        @unique @map("refresh_token") @db.VarChar(512)
+  status       SessionStatus @default(ACTIVE)
+  ipAddress    String?       @map("ip_address") @db.VarChar(45)
+  userAgent    String?       @map("user_agent")
+  deviceId     String?       @map("device_id") @db.VarChar(128)
+  deviceName   String?       @map("device_name") @db.VarChar(255)
+  expiresAt    DateTime      @map("expires_at") @db.Timestamptz
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  revokedAt    DateTime?     @map("revoked_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tenantId])
+  @@map("user_sessions")
+  @@schema("core")
+}
+
+model MfaDevice {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  type       String   @db.VarChar(32)
+  secret     String
+  isVerified Boolean  @default(false) @map("is_verified")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("mfa_devices")
+  @@schema("core")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  token     String   @unique @db.VarChar(128)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  usedAt    DateTime? @map("used_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+  @@schema("core")
+}
+
+// ─── PATIENT SCHEMA ──────────────────────────────────────────────────────────
+
+model Patient {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  branchId           String   @map("branch_id") @db.Uuid
+  uhid               String   @db.VarChar(32)
+  firstName          String   @map("first_name") @db.VarChar(100)
+  middleName         String?  @map("middle_name") @db.VarChar(100)
+  lastName           String?  @map("last_name") @db.VarChar(100)
+  dateOfBirth        DateTime? @map("date_of_birth") @db.Date
+  gender             Gender   @default(UNKNOWN)
+  bloodGroup         String?  @map("blood_group") @db.VarChar(5)
+  email              String?  @db.VarChar(255)
+  phone              String   @db.VarChar(20)
+  alternatePhone     String?  @map("alternate_phone") @db.VarChar(20)
+  address            Json     @default("{}")
+  abhaNumber         String?  @map("abha_number") @db.VarChar(64)
+  abhaAddress        String?  @map("abha_address") @db.VarChar(128)
+  photoUrl           String?  @map("photo_url")
+  metadata           Json     @default("{}")
+  status             String   @default("active") @db.VarChar(32)
+  registeredBranchId String?  @map("registered_branch_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdBy          String?  @map("created_by") @db.Uuid
+
+  identifiers  PatientIdentifier[]
+  consents     PatientConsent[]
+  documents    PatientDocument[]
+  visits       PatientVisit[]
+  timelineEvents PatientTimelineEvent[]
+  familyMembers FamilyMember[]
+  labOrders    LabOrder[]
+
+  @@unique([tenantId, uhid])
+  @@index([tenantId])
+  @@index([tenantId, phone])
+  @@index([organizationId])
+  @@index([branchId])
+  @@map("patients")
+  @@schema("patient")
+}
+
+model PatientIdentifier {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  branchId   String    @map("branch_id") @db.Uuid
+  patientId  String    @map("patient_id") @db.Uuid
+  idType     String    @map("id_type") @db.VarChar(32)
+  idValue    String    @map("id_value")
+  isPrimary  Boolean   @default(false) @map("is_primary")
+  verifiedAt DateTime? @map("verified_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([tenantId])
+  @@map("patient_identifiers")
+  @@schema("patient")
+}
+
+model Family {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  branchId      String   @map("branch_id") @db.Uuid
+  familyCode    String   @map("family_code") @db.VarChar(32)
+  headPatientId String?  @map("head_patient_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  members FamilyMember[]
+
+  @@unique([tenantId, familyCode])
+  @@index([tenantId])
+  @@map("families")
+  @@schema("patient")
+}
+
+model FamilyMember {
+  id           String @id @default(uuid()) @db.Uuid
+  familyId     String @map("family_id") @db.Uuid
+  patientId    String @map("patient_id") @db.Uuid
+  relationship String @db.VarChar(32)
+
+  family  Family  @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  patient Patient @relation(fields: [patientId], references: [id])
+
+  @@unique([familyId, patientId])
+  @@map("family_members")
+  @@schema("patient")
+}
+
+model PatientConsent {
+  id             String        @id @default(uuid()) @db.Uuid
+  tenantId       String        @map("tenant_id") @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  branchId       String        @map("branch_id") @db.Uuid
+  patientId      String        @map("patient_id") @db.Uuid
+  consentType    ConsentType   @map("consent_type")
+  status         ConsentStatus @default(PENDING)
+  grantedAt      DateTime?     @map("granted_at") @db.Timestamptz
+  expiresAt      DateTime?     @map("expires_at") @db.Timestamptz
+  revokedAt      DateTime?     @map("revoked_at") @db.Timestamptz
+  abdmArtefact   Json?         @map("abdm_artefact")
+  ipAddress      String?       @map("ip_address") @db.VarChar(45)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([tenantId])
+  @@map("patient_consents")
+  @@schema("patient")
+}
+
+model PatientDocument {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  patientId      String   @map("patient_id") @db.Uuid
+  documentType   String   @map("document_type") @db.VarChar(64)
+  fileName       String   @map("file_name") @db.VarChar(255)
+  s3Key          String   @map("s3_key")
+  mimeType       String?  @map("mime_type") @db.VarChar(128)
+  uploadedBy     String?  @map("uploaded_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@map("patient_documents")
+  @@schema("patient")
+}
+
+model PatientVisit {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  branchId       String    @map("branch_id") @db.Uuid
+  patientId      String    @map("patient_id") @db.Uuid
+  visitType      String    @map("visit_type") @db.VarChar(32)
+  visitNumber    String    @map("visit_number") @db.VarChar(32)
+  checkInAt      DateTime  @default(now()) @map("check_in_at") @db.Timestamptz
+  checkOutAt     DateTime? @map("check_out_at") @db.Timestamptz
+  status         String    @default("active") @db.VarChar(32)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([tenantId, branchId])
+  @@map("patient_visits")
+  @@schema("patient")
+}
+
+model PatientTimelineEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  patientId      String   @map("patient_id") @db.Uuid
+  eventType      String   @map("event_type") @db.VarChar(64)
+  title          String   @db.VarChar(255)
+  description    String?
+  referenceType  String?  @map("reference_type") @db.VarChar(64)
+  referenceId    String?  @map("reference_id") @db.Uuid
+  occurredAt     DateTime @map("occurred_at") @db.Timestamptz
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId, occurredAt(sort: Desc)])
+  @@map("patient_timeline_events")
+  @@schema("patient")
+}
+
+model UhidSequence {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  branchId String @map("branch_id") @db.Uuid
+  prefix   String @db.VarChar(16)
+  lastSeq  Int    @default(0) @map("last_seq")
+
+  @@unique([tenantId, branchId])
+  @@map("uhid_sequences")
+  @@schema("patient")
+}
+
+// ─── MASTER / LIMS SCHEMA ────────────────────────────────────────────────────
+
+model TestCategory {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(128)
+  parentId       String?  @map("parent_id") @db.Uuid
+  sortOrder      Int      @default(0) @map("sort_order")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  parent   TestCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children TestCategory[] @relation("CategoryHierarchy")
+  tests    TestMaster[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("test_categories")
+  @@schema("master")
+}
+
+model TestMaster {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  categoryId      String   @map("category_id") @db.Uuid
+  code            String   @db.VarChar(32)
+  name            String   @db.VarChar(255)
+  shortName       String?  @map("short_name") @db.VarChar(64)
+  specimenType    String   @map("specimen_type") @db.VarChar(32)
+  containerType   String?  @map("container_type") @db.VarChar(32)
+  tatHours        Int      @default(24) @map("tat_hours")
+  methodology     Json     @default("{}")
+  referenceRanges Json     @default("[]") @map("reference_ranges")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  category   TestCategory    @relation(fields: [categoryId], references: [id])
+  parameters TestParameter[]
+  pricing    TestPricing[]
+  packageTests PackageTest[]
+  orderItems LabOrderItem[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("test_masters")
+  @@schema("master")
+}
+
+model TestParameter {
+  id            String @id @default(uuid()) @db.Uuid
+  tenantId      String @map("tenant_id") @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  testId        String @map("test_id") @db.Uuid
+  code          String @db.VarChar(32)
+  name          String @db.VarChar(128)
+  unit          String? @db.VarChar(32)
+  dataType      String @default("numeric") @map("data_type") @db.VarChar(16)
+  decimalPlaces Int?   @default(2) @map("decimal_places")
+  sortOrder     Int    @default(0) @map("sort_order")
+
+  test    TestMaster    @relation(fields: [testId], references: [id], onDelete: Cascade)
+  results SampleResult[]
+
+  @@unique([testId, code])
+  @@map("test_parameters")
+  @@schema("master")
+}
+
+model TestPricing {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  branchId       String?   @map("branch_id") @db.Uuid
+  testId         String    @map("test_id") @db.Uuid
+  basePrice      Decimal   @map("base_price") @db.Decimal(12, 2)
+  mrp            Decimal?  @db.Decimal(12, 2)
+  corporatePrice Decimal?  @map("corporate_price") @db.Decimal(12, 2)
+  effectiveFrom  DateTime  @default(now()) @map("effective_from") @db.Date
+  effectiveTo    DateTime? @map("effective_to") @db.Date
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  test TestMaster @relation(fields: [testId], references: [id])
+
+  @@index([testId, branchId])
+  @@map("test_pricing")
+  @@schema("master")
+}
+
+model PackageMaster {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  description    String?
+  packagePrice   Decimal  @map("package_price") @db.Decimal(12, 2)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tests      PackageTest[]
+  orderItems LabOrderItem[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("package_masters")
+  @@schema("master")
+}
+
+model PackageTest {
+  packageId String @map("package_id") @db.Uuid
+  testId    String @map("test_id") @db.Uuid
+
+  package PackageMaster @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  test    TestMaster    @relation(fields: [testId], references: [id])
+
+  @@id([packageId, testId])
+  @@map("package_tests")
+  @@schema("master")
+}
+
+model Specialty {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(128)
+  description    String?
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("specialties")
+  @@schema("master")
+}
+
+model StateMaster {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique @db.VarChar(4)
+  name      String   @db.VarChar(128)
+  gstCode   String?  @map("gst_code") @db.VarChar(2)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  cities CityMaster[]
+
+  @@map("states")
+  @@schema("master")
+}
+
+model CityMaster {
+  id        String   @id @default(uuid()) @db.Uuid
+  stateId   String   @map("state_id") @db.Uuid
+  code      String   @db.VarChar(16)
+  name      String   @db.VarChar(128)
+  pincode   String?  @db.VarChar(10)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  state StateMaster @relation(fields: [stateId], references: [id])
+
+  @@unique([stateId, code])
+  @@map("cities")
+  @@schema("master")
+}
+
+model TaxMaster {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  code           String    @db.VarChar(32)
+  name           String    @db.VarChar(128)
+  hsnSacCode     String?   @map("hsn_sac_code") @db.VarChar(16)
+  cgstRate       Decimal   @default(0) @map("cgst_rate") @db.Decimal(5, 2)
+  sgstRate       Decimal   @default(0) @map("sgst_rate") @db.Decimal(5, 2)
+  igstRate       Decimal   @default(0) @map("igst_rate") @db.Decimal(5, 2)
+  cessRate       Decimal   @default(0) @map("cess_rate") @db.Decimal(5, 2)
+  isExempt       Boolean   @default(false) @map("is_exempt")
+  effectiveFrom  DateTime  @default(now()) @map("effective_from") @db.Date
+  effectiveTo    DateTime? @map("effective_to") @db.Date
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  billingCodes BillingCode[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("tax_masters")
+  @@schema("master")
+}
+
+model BillingCode {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  description    String?
+  codeType       String   @map("code_type") @db.VarChar(32)
+  taxMasterId    String?  @map("tax_master_id") @db.Uuid
+  defaultPrice   Decimal? @map("default_price") @db.Decimal(12, 2)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  taxMaster TaxMaster? @relation(fields: [taxMasterId], references: [id])
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("billing_codes")
+  @@schema("master")
+}
+
+model ProfileMaster {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  description    String?
+  profilePrice   Decimal  @map("profile_price") @db.Decimal(12, 2)
+  testIds        Json     @default("[]") @map("test_ids")
+  packageIds     Json     @default("[]") @map("package_ids")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("profile_masters")
+  @@schema("master")
+}
+
+model RateCard {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  branchId       String?   @map("branch_id") @db.Uuid
+  code           String    @db.VarChar(32)
+  name           String    @db.VarChar(128)
+  cardType       String    @map("card_type") @db.VarChar(32)
+  clientType     String    @map("client_type") @db.VarChar(32)
+  clientId       String?   @map("client_id") @db.Uuid
+  pricingRules   Json      @default("[]") @map("pricing_rules")
+  effectiveFrom  DateTime  @default(now()) @map("effective_from") @db.Date
+  effectiveTo    DateTime? @map("effective_to") @db.Date
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, code])
+  @@index([tenantId, clientType])
+  @@map("rate_cards")
+  @@schema("master")
+}
+
+model DeviceCatalog {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(64)
+  name           String   @db.VarChar(255)
+  vendor         String   @db.VarChar(32)
+  model          String?  @db.VarChar(128)
+  deviceType     String   @map("device_type") @db.VarChar(32)
+  protocol       String?  @db.VarChar(32)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("device_catalog")
+  @@schema("master")
+}
+
+model DepartmentMaster {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(128)
+  departmentType String   @map("department_type") @db.VarChar(32)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("department_masters")
+  @@schema("master")
+}
+
+model LabOrder {
+  id               String      @id @default(uuid()) @db.Uuid
+  tenantId         String      @map("tenant_id") @db.Uuid
+  organizationId   String      @map("organization_id") @db.Uuid
+  branchId         String      @map("branch_id") @db.Uuid
+  patientId        String      @map("patient_id") @db.Uuid
+  orderNumber      String      @map("order_number") @db.VarChar(32)
+  orderSource      String      @default("walk_in") @map("order_source") @db.VarChar(32)
+  status           OrderStatus @default(DRAFT)
+  priority         String      @default("routine") @db.VarChar(16)
+  orderedBy        String?     @map("ordered_by") @db.Uuid
+  referringDoctor  String?     @map("referring_doctor") @db.VarChar(255)
+  clinicalNotes    String?     @map("clinical_notes")
+  subtotal         Decimal     @default(0) @db.Decimal(12, 2)
+  discount         Decimal     @default(0) @db.Decimal(12, 2)
+  taxAmount        Decimal     @default(0) @map("tax_amount") @db.Decimal(12, 2)
+  totalAmount      Decimal     @default(0) @map("total_amount") @db.Decimal(12, 2)
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  patient Patient        @relation(fields: [patientId], references: [id])
+  items   LabOrderItem[]
+  samples Sample[]
+  reports Report[]
+
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId])
+  @@index([patientId])
+  @@index([branchId, status])
+  @@map("lab_orders")
+  @@schema("lims")
+}
+
+model LabOrderItem {
+  id             String  @id @default(uuid()) @db.Uuid
+  tenantId       String  @map("tenant_id") @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  branchId       String  @map("branch_id") @db.Uuid
+  labOrderId     String  @map("lab_order_id") @db.Uuid
+  testId         String? @map("test_id") @db.Uuid
+  packageId      String? @map("package_id") @db.Uuid
+  itemName       String  @map("item_name") @db.VarChar(255)
+  quantity       Int     @default(1)
+  unitPrice      Decimal @map("unit_price") @db.Decimal(12, 2)
+  discount       Decimal @default(0) @db.Decimal(12, 2)
+  lineTotal      Decimal @map("line_total") @db.Decimal(12, 2)
+  status         String  @default("pending") @db.VarChar(32)
+
+  labOrder LabOrder       @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
+  test     TestMaster?    @relation(fields: [testId], references: [id])
+  package  PackageMaster? @relation(fields: [packageId], references: [id])
+  samples  Sample[]
+
+  @@index([labOrderId])
+  @@map("lab_order_items")
+  @@schema("lims")
+}
+
+model Sample {
+  id                   String       @id @default(uuid()) @db.Uuid
+  tenantId             String       @map("tenant_id") @db.Uuid
+  organizationId       String       @map("organization_id") @db.Uuid
+  branchId             String       @map("branch_id") @db.Uuid
+  labOrderId           String       @map("lab_order_id") @db.Uuid
+  labOrderItemId       String       @map("lab_order_item_id") @db.Uuid
+  sampleNumber         String       @map("sample_number") @db.VarChar(32)
+  barcode              String       @db.VarChar(64)
+  qrPayload            String?      @map("qr_payload")
+  sampleType           String       @map("sample_type") @db.VarChar(32)
+  status               SampleStatus @default(ORDERED)
+  collectionBranchId   String       @map("collection_branch_id") @db.Uuid
+  processingBranchId   String?      @map("processing_branch_id") @db.Uuid
+  collectedBy          String?      @map("collected_by") @db.Uuid
+  collectedAt          DateTime?    @map("collected_at") @db.Timestamptz
+  receivedAt           DateTime?    @map("received_at") @db.Timestamptz
+  processedAt          DateTime?    @map("processed_at") @db.Timestamptz
+  verifiedAt           DateTime?    @map("verified_at") @db.Timestamptz
+  approvedAt           DateTime?    @map("approved_at") @db.Timestamptz
+  rejectedAt           DateTime?    @map("rejected_at") @db.Timestamptz
+  rejectionReason      String?      @map("rejection_reason")
+  storageLocation      String?      @map("storage_location") @db.VarChar(64)
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  labOrder     LabOrder       @relation(fields: [labOrderId], references: [id])
+  labOrderItem LabOrderItem   @relation(fields: [labOrderItemId], references: [id])
+  events       SampleEvent[]
+  results      SampleResult[]
+  reports      Report[]
+
+  @@unique([tenantId, barcode])
+  @@index([tenantId, status])
+  @@index([labOrderId])
+  @@map("samples")
+  @@schema("lims")
+}
+
+model SampleEvent {
+  id             String        @id @default(uuid()) @db.Uuid
+  tenantId       String        @map("tenant_id") @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  branchId       String        @map("branch_id") @db.Uuid
+  sampleId       String        @map("sample_id") @db.Uuid
+  fromStatus     SampleStatus? @map("from_status")
+  toStatus       SampleStatus  @map("to_status")
+  eventType      String        @map("event_type") @db.VarChar(64)
+  notes          String?
+  performedBy    String?       @map("performed_by") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  sample Sample @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+
+  @@index([sampleId])
+  @@map("sample_events")
+  @@schema("lims")
+}
+
+model SampleResult {
+  id             String     @id @default(uuid()) @db.Uuid
+  tenantId       String     @map("tenant_id") @db.Uuid
+  organizationId String     @map("organization_id") @db.Uuid
+  branchId       String     @map("branch_id") @db.Uuid
+  sampleId       String     @map("sample_id") @db.Uuid
+  parameterId    String     @map("parameter_id") @db.Uuid
+  value          String
+  unit           String?    @db.VarChar(32)
+  flag           ResultFlag @default(NORMAL)
+  status         String     @default("pending") @db.VarChar(32)
+  referenceRange String?    @map("reference_range")
+  deviceId       String?    @map("device_id") @db.Uuid
+  rawValue       String?    @map("raw_value")
+  verifiedBy     String?    @map("verified_by") @db.Uuid
+  verifiedAt     DateTime?  @map("verified_at") @db.Timestamptz
+  approvedBy     String?    @map("approved_by") @db.Uuid
+  approvedAt     DateTime?  @map("approved_at") @db.Timestamptz
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  sample    Sample        @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  parameter TestParameter @relation(fields: [parameterId], references: [id])
+
+  @@unique([sampleId, parameterId])
+  @@index([sampleId])
+  @@map("sample_results")
+  @@schema("lims")
+}
+
+model Report {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  branchId       String    @map("branch_id") @db.Uuid
+  sampleId       String    @map("sample_id") @db.Uuid
+  labOrderId     String    @map("lab_order_id") @db.Uuid
+  reportNumber   String    @map("report_number") @db.VarChar(32)
+  status         String    @default("draft") @db.VarChar(32)
+  templateId     String?   @map("template_id") @db.Uuid
+  pdfS3Key       String?   @map("pdf_s3_key")
+  releasedAt     DateTime? @map("released_at") @db.Timestamptz
+  releasedBy     String?   @map("released_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  sample   Sample   @relation(fields: [sampleId], references: [id])
+  labOrder LabOrder @relation(fields: [labOrderId], references: [id])
+
+  @@unique([tenantId, reportNumber])
+  @@index([sampleId])
+  @@map("reports")
+  @@schema("lims")
+}
+
+model OrderSequence {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  branchId String @map("branch_id") @db.Uuid
+  prefix   String @db.VarChar(16)
+  lastSeq  Int    @default(0) @map("last_seq")
+
+  @@unique([tenantId, branchId])
+  @@map("order_sequences")
+  @@schema("lims")
+}
+
+// ─── AUDIT SCHEMA ────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id             String      @id @default(uuid()) @db.Uuid
+  tenantId       String      @map("tenant_id") @db.Uuid
+  organizationId String?     @map("organization_id") @db.Uuid
+  branchId       String?     @map("branch_id") @db.Uuid
+  userId         String?     @map("user_id") @db.Uuid
+  action         AuditAction
+  entityType     String      @map("entity_type") @db.VarChar(64)
+  entityId       String?     @map("entity_id") @db.Uuid
+  oldValue       Json?       @map("old_value")
+  newValue       Json?       @map("new_value")
+  ipAddress      String?     @map("ip_address") @db.VarChar(45)
+  userAgent      String?     @map("user_agent")
+  requestId      String?     @map("request_id") @db.VarChar(64)
+  metadata       Json        @default("{}")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+  @@schema("audit")
+}
+
+// ─── DEVICE SCHEMA ───────────────────────────────────────────────────────────
+
+enum DeviceVendor {
+  ROCHE
+  ABBOTT
+  SIEMENS
+  SYSMEX
+  BECKMAN_COULTER
+  GENERIC
+
+  @@schema("device")
+}
+
+enum DeviceProtocol {
+  ASTM
+  HL7_V2
+  FHIR
+  DICOM
+  PROPRIETARY
+
+  @@schema("device")
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  ERROR
+  MAINTENANCE
+  DECOMMISSIONED
+
+  @@schema("device")
+}
+
+enum ConnectionType {
+  TCP
+  SERIAL
+  MLLP
+  HTTP
+  HTTPS
+  FILE
+
+  @@schema("device")
+}
+
+enum MessageParseStatus {
+  PENDING
+  PARSING
+  PARSED
+  FAILED
+  RETRYING
+  DLQ
+
+  @@schema("device")
+}
+
+enum QueueItemStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DLQ
+
+  @@schema("device")
+}
+
+enum DeviceEventType {
+  CONNECTED
+  DISCONNECTED
+  MESSAGE_RECEIVED
+  MESSAGE_PARSED
+  MESSAGE_FAILED
+  RESULT_IMPORTED
+  HEARTBEAT
+  ERROR
+  CONFIG_CHANGED
+  CERTIFICATE_EXPIRING
+
+  @@schema("device")
+}
+
+model Device {
+  id               String         @id @default(uuid()) @db.Uuid
+  tenantId         String         @map("tenant_id") @db.Uuid
+  organizationId   String         @map("organization_id") @db.Uuid
+  branchId         String         @map("branch_id") @db.Uuid
+  deviceCode       String         @map("device_code") @db.VarChar(64)
+  name             String         @db.VarChar(255)
+  vendor           DeviceVendor
+  model            String?        @db.VarChar(128)
+  serialNumber     String?        @map("serial_number") @db.VarChar(128)
+  protocol         DeviceProtocol
+  connectionType   ConnectionType @map("connection_type")
+  connectionConfig Json           @default("{}") @map("connection_config")
+  firmwareVersion  String?        @map("firmware_version") @db.VarChar(32)
+  softwareVersion  String?        @map("software_version") @db.VarChar(32)
+  status           DeviceStatus   @default(OFFLINE)
+  lastSeenAt       DateTime?      @map("last_seen_at") @db.Timestamptz
+  isActive         Boolean        @default(true) @map("is_active")
+  metadata         Json           @default("{}")
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  adapters    DeviceAdapter[]
+  connections DeviceConnection[]
+  messages    DeviceMessage[]
+  logs        DeviceLog[]
+  events      DeviceEvent[]
+  health      DeviceHealth[]
+  certificates DeviceCertificate[]
+  resultQueue ResultQueueItem[]
+
+  @@unique([tenantId, deviceCode])
+  @@index([tenantId, branchId])
+  @@index([tenantId, status])
+  @@map("devices")
+  @@schema("device")
+}
+
+model DeviceAdapter {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  organizationId      String   @map("organization_id") @db.Uuid
+  branchId            String   @map("branch_id") @db.Uuid
+  deviceId            String   @map("device_id") @db.Uuid
+  adapterVersion      String   @map("adapter_version") @db.VarChar(16)
+  vendor              DeviceVendor
+  fieldMapping        Json     @default("{}") @map("field_mapping")
+  transformationRules Json     @default("{}") @map("transformation_rules")
+  validationRules     Json     @default("{}") @map("validation_rules")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@map("adapters")
+  @@schema("device")
+}
+
+model DeviceConnection {
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  branchId       String         @map("branch_id") @db.Uuid
+  deviceId       String         @map("device_id") @db.Uuid
+  protocol       DeviceProtocol
+  connectionType ConnectionType @map("connection_type")
+  host           String?        @db.VarChar(255)
+  port           Int?
+  path           String?        @db.VarChar(255)
+  config         Json           @default("{}")
+  isActive       Boolean        @default(true) @map("is_active")
+  lastConnectedAt DateTime?     @map("last_connected_at") @db.Timestamptz
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@map("connections")
+  @@schema("device")
+}
+
+model DeviceMessage {
+  id             String             @id @default(uuid()) @db.Uuid
+  tenantId       String             @map("tenant_id") @db.Uuid
+  organizationId String             @map("organization_id") @db.Uuid
+  branchId       String             @map("branch_id") @db.Uuid
+  deviceId       String             @map("device_id") @db.Uuid
+  protocol       DeviceProtocol
+  rawPayload     String             @map("raw_payload")
+  parsedPayload  Json?              @map("parsed_payload")
+  parseStatus    MessageParseStatus @default(PENDING) @map("parse_status")
+  errorMessage   String?            @map("error_message")
+  retryCount     Int                @default(0) @map("retry_count")
+  maxRetries     Int                @default(5) @map("max_retries")
+  sampleBarcode  String?            @map("sample_barcode") @db.VarChar(64)
+  messageControlId String?          @map("message_control_id") @db.VarChar(64)
+  checksumValid  Boolean?           @map("checksum_valid")
+  parsedAt       DateTime?          @map("parsed_at") @db.Timestamptz
+  receivedAt     DateTime           @default(now()) @map("received_at") @db.Timestamptz
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, receivedAt(sort: Desc)])
+  @@index([tenantId, parseStatus])
+  @@index([sampleBarcode])
+  @@map("device_messages")
+  @@schema("device")
+}
+
+model ResultQueueItem {
+  id             String          @id @default(uuid()) @db.Uuid
+  tenantId       String          @map("tenant_id") @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  branchId       String          @map("branch_id") @db.Uuid
+  deviceId       String          @map("device_id") @db.Uuid
+  messageId      String?         @map("message_id") @db.Uuid
+  sampleBarcode  String          @map("sample_barcode") @db.VarChar(64)
+  sampleId       String?         @map("sample_id") @db.Uuid
+  parameterCode  String          @map("parameter_code") @db.VarChar(32)
+  parameterId    String?         @map("parameter_id") @db.Uuid
+  value          String
+  unit           String?         @db.VarChar(32)
+  rawValue       String?         @map("raw_value")
+  status         QueueItemStatus @default(PENDING)
+  retryCount     Int             @default(0) @map("retry_count")
+  errorMessage   String?         @map("error_message")
+  processedAt    DateTime?       @map("processed_at") @db.Timestamptz
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([deviceId, status])
+  @@index([sampleBarcode])
+  @@map("result_queue")
+  @@schema("device")
+}
+
+model DeviceLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  deviceId       String   @map("device_id") @db.Uuid
+  level          String   @db.VarChar(16)
+  message        String
+  context        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, createdAt(sort: Desc)])
+  @@map("device_logs")
+  @@schema("device")
+}
+
+model DeviceEvent {
+  id             String          @id @default(uuid()) @db.Uuid
+  tenantId       String          @map("tenant_id") @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  branchId       String          @map("branch_id") @db.Uuid
+  deviceId       String          @map("device_id") @db.Uuid
+  eventType      DeviceEventType @map("event_type")
+  payload        Json            @default("{}")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, createdAt(sort: Desc)])
+  @@index([tenantId, eventType])
+  @@map("device_events")
+  @@schema("device")
+}
+
+model DeviceHealth {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  branchId       String       @map("branch_id") @db.Uuid
+  deviceId       String       @map("device_id") @db.Uuid
+  status         DeviceStatus
+  messagesPerMin Int          @default(0) @map("messages_per_min")
+  errorRate      Decimal      @default(0) @map("error_rate") @db.Decimal(5, 4)
+  queueDepth     Int          @default(0) @map("queue_depth")
+  dlqDepth       Int          @default(0) @map("dlq_depth")
+  latencyMs      Int          @default(0) @map("latency_ms")
+  metrics        Json         @default("{}")
+  recordedAt     DateTime     @default(now()) @map("recorded_at") @db.Timestamptz
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, recordedAt(sort: Desc)])
+  @@map("device_health")
+  @@schema("device")
+}
+
+model ProtocolConfig {
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  branchId       String?        @map("branch_id") @db.Uuid
+  protocol       DeviceProtocol
+  vendor         DeviceVendor?
+  name           String         @db.VarChar(128)
+  config         Json           @default("{}")
+  isActive       Boolean        @default(true) @map("is_active")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([tenantId, protocol])
+  @@map("protocol_config")
+  @@schema("device")
+}
+
+model DeviceCertificate {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  branchId       String    @map("branch_id") @db.Uuid
+  deviceId       String    @map("device_id") @db.Uuid
+  certificateType String   @map("certificate_type") @db.VarChar(32)
+  subject        String    @db.VarChar(255)
+  issuer         String?   @db.VarChar(255)
+  serialNumber   String?   @map("serial_number") @db.VarChar(128)
+  fingerprint    String?   @db.VarChar(128)
+  validFrom      DateTime  @map("valid_from") @db.Timestamptz
+  validTo        DateTime  @map("valid_to") @db.Timestamptz
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([validTo])
+  @@map("device_certificates")
+  @@schema("device")
+}
+
+model DeadLetterItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  deviceId       String   @map("device_id") @db.Uuid
+  sourceType     String   @map("source_type") @db.VarChar(32)
+  sourceId       String   @map("source_id") @db.Uuid
+  rawPayload     String   @map("raw_payload")
+  errorMessage   String   @map("error_message")
+  retryCount     Int      @default(0) @map("retry_count")
+  resolvedAt     DateTime? @map("resolved_at") @db.Timestamptz
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([deviceId])
+  @@map("dead_letter_queue")
+  @@schema("device")
+}
+
+// ─── BILLING SCHEMA ──────────────────────────────────────────────────────────
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  VOID
+  REFUNDED
+  OVERDUE
+
+  @@schema("billing")
+}
+
+enum InvoiceType {
+  LAB
+  OPD
+  HOME_COLLECTION
+  CORPORATE
+  INSURANCE
+  FRANCHISE
+  PACKAGE
+  PROFILE
+  URGENT
+
+  @@schema("billing")
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  UPI
+  NETBANKING
+  WALLET
+  CHEQUE
+  INSURANCE
+  CORPORATE
+  RAZORPAY
+  CASHFREE
+  PAYU
+
+  @@schema("billing")
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  REFUNDED
+  CANCELLED
+
+  @@schema("billing")
+}
+
+enum ClaimStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  PARTIALLY_APPROVED
+  REJECTED
+  SETTLED
+  RECONCILED
+
+  @@schema("billing")
+}
+
+enum SettlementStatus {
+  PENDING
+  CALCULATED
+  APPROVED
+  PAID
+  DISPUTED
+
+  @@schema("billing")
+}
+
+enum GstType {
+  CGST_SGST
+  IGST
+  EXEMPT
+
+  @@schema("billing")
+}
+
+model Invoice {
+  id               String        @id @default(uuid()) @db.Uuid
+  tenantId         String        @map("tenant_id") @db.Uuid
+  organizationId   String        @map("organization_id") @db.Uuid
+  branchId         String        @map("branch_id") @db.Uuid
+  patientId        String?       @map("patient_id") @db.Uuid
+  corporateClientId String?      @map("corporate_client_id") @db.Uuid
+  invoiceNumber    String        @map("invoice_number") @db.VarChar(32)
+  invoiceType      InvoiceType   @map("invoice_type")
+  status           InvoiceStatus @default(DRAFT)
+  referenceType    String?       @map("reference_type") @db.VarChar(32)
+  referenceId      String?       @map("reference_id") @db.Uuid
+  subtotal         Decimal       @default(0) @db.Decimal(14, 2)
+  discountAmount   Decimal       @default(0) @map("discount_amount") @db.Decimal(14, 2)
+  taxableAmount    Decimal       @default(0) @map("taxable_amount") @db.Decimal(14, 2)
+  cgstAmount       Decimal       @default(0) @map("cgst_amount") @db.Decimal(14, 2)
+  sgstAmount       Decimal       @default(0) @map("sgst_amount") @db.Decimal(14, 2)
+  igstAmount       Decimal       @default(0) @map("igst_amount") @db.Decimal(14, 2)
+  cessAmount       Decimal       @default(0) @map("cess_amount") @db.Decimal(14, 2)
+  totalAmount      Decimal       @default(0) @map("total_amount") @db.Decimal(14, 2)
+  paidAmount       Decimal       @default(0) @map("paid_amount") @db.Decimal(14, 2)
+  balanceAmount    Decimal       @default(0) @map("balance_amount") @db.Decimal(14, 2)
+  gstin            String?       @db.VarChar(15)
+  placeOfSupply    String?       @map("place_of_supply") @db.VarChar(64)
+  gstType          GstType?      @map("gst_type")
+  dueDate          DateTime?     @map("due_date") @db.Date
+  issuedAt         DateTime?     @map("issued_at") @db.Timestamptz
+  voidedAt         DateTime?     @map("voided_at") @db.Timestamptz
+  voidReason       String?       @map("void_reason")
+  notes            String?
+  metadata         Json          @default("{}")
+  createdBy        String?       @map("created_by") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  lines            InvoiceLine[]
+  payments         Payment[]
+  claims           InsuranceClaim[]
+  gstLines         GstLine[]
+
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId, status])
+  @@index([patientId])
+  @@index([corporateClientId])
+  @@index([branchId, createdAt(sort: Desc)])
+  @@map("invoices")
+  @@schema("billing")
+}
+
+model InvoiceLine {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  invoiceId      String   @map("invoice_id") @db.Uuid
+  lineType       String   @map("line_type") @db.VarChar(32)
+  itemCode       String?  @map("item_code") @db.VarChar(32)
+  description    String   @db.VarChar(255)
+  hsnSacCode     String?  @map("hsn_sac_code") @db.VarChar(16)
+  quantity       Decimal  @default(1) @db.Decimal(10, 2)
+  unitPrice      Decimal  @map("unit_price") @db.Decimal(14, 2)
+  discount       Decimal  @default(0) @db.Decimal(14, 2)
+  taxableAmount  Decimal  @map("taxable_amount") @db.Decimal(14, 2)
+  cgstRate       Decimal  @default(0) @map("cgst_rate") @db.Decimal(5, 2)
+  sgstRate       Decimal  @default(0) @map("sgst_rate") @db.Decimal(5, 2)
+  igstRate       Decimal  @default(0) @map("igst_rate") @db.Decimal(5, 2)
+  cgstAmount     Decimal  @default(0) @map("cgst_amount") @db.Decimal(14, 2)
+  sgstAmount     Decimal  @default(0) @map("sgst_amount") @db.Decimal(14, 2)
+  igstAmount     Decimal  @default(0) @map("igst_amount") @db.Decimal(14, 2)
+  lineTotal      Decimal  @map("line_total") @db.Decimal(14, 2)
+  referenceType  String?  @map("reference_type") @db.VarChar(32)
+  referenceId    String?  @map("reference_id") @db.Uuid
+  sortOrder      Int      @default(0) @map("sort_order")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_lines")
+  @@schema("billing")
+}
+
+model Payment {
+  id               String        @id @default(uuid()) @db.Uuid
+  tenantId         String        @map("tenant_id") @db.Uuid
+  organizationId   String        @map("organization_id") @db.Uuid
+  branchId         String        @map("branch_id") @db.Uuid
+  invoiceId        String        @map("invoice_id") @db.Uuid
+  paymentNumber    String        @map("payment_number") @db.VarChar(32)
+  method           PaymentMethod
+  status           PaymentStatus @default(PENDING)
+  amount           Decimal       @db.Decimal(14, 2)
+  gatewayProvider  String?       @map("gateway_provider") @db.VarChar(32)
+  gatewayOrderId   String?       @map("gateway_order_id") @db.VarChar(128)
+  gatewayPaymentId String?       @map("gateway_payment_id") @db.VarChar(128)
+  gatewaySignature String?       @map("gateway_signature")
+  upiId            String?       @map("upi_id") @db.VarChar(128)
+  cardLast4        String?       @map("card_last4") @db.VarChar(4)
+  chequeNumber     String?       @map("cheque_number") @db.VarChar(32)
+  chequeDate       DateTime?     @map("cheque_date") @db.Date
+  bankReference    String?       @map("bank_reference") @db.VarChar(64)
+  paidAt           DateTime?     @map("paid_at") @db.Timestamptz
+  refundedAt       DateTime?     @map("refunded_at") @db.Timestamptz
+  refundAmount     Decimal?      @map("refund_amount") @db.Decimal(14, 2)
+  metadata         Json          @default("{}")
+  createdBy        String?       @map("created_by") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  invoice      Invoice              @relation(fields: [invoiceId], references: [id])
+  transactions PaymentTransaction[]
+
+  @@unique([tenantId, paymentNumber])
+  @@index([invoiceId])
+  @@index([tenantId, status])
+  @@map("payments")
+  @@schema("billing")
+}
+
+model PaymentTransaction {
+  id              String        @id @default(uuid()) @db.Uuid
+  tenantId        String        @map("tenant_id") @db.Uuid
+  paymentId       String        @map("payment_id") @db.Uuid
+  transactionType String        @map("transaction_type") @db.VarChar(32)
+  status          PaymentStatus
+  amount          Decimal       @db.Decimal(14, 2)
+  gatewayResponse Json?         @map("gateway_response")
+  errorMessage    String?       @map("error_message")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("payment_transactions")
+  @@schema("billing")
+}
+
+model CorporateClient {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  code             String   @db.VarChar(32)
+  name             String   @db.VarChar(255)
+  legalName        String?  @map("legal_name") @db.VarChar(255)
+  gstin            String?  @db.VarChar(15)
+  pan              String?  @db.VarChar(10)
+  contactPerson    String?  @map("contact_person") @db.VarChar(128)
+  email            String?  @db.VarChar(255)
+  phone            String?  @db.VarChar(20)
+  address          Json     @default("{}")
+  billingCycle     String   @default("monthly") @map("billing_cycle") @db.VarChar(16)
+  paymentTermsDays Int      @default(30) @map("payment_terms_days")
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  contracts   CorporateContract[]
+  creditLimit CreditLimit?
+  statements  MonthlyStatement[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("corporate_clients")
+  @@schema("billing")
+}
+
+model CorporateContract {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  organizationId    String    @map("organization_id") @db.Uuid
+  corporateClientId String    @map("corporate_client_id") @db.Uuid
+  contractNumber    String    @map("contract_number") @db.VarChar(32)
+  rateCardId        String?   @map("rate_card_id") @db.Uuid
+  discountPercent   Decimal   @default(0) @map("discount_percent") @db.Decimal(5, 2)
+  creditLimit       Decimal?  @map("credit_limit") @db.Decimal(14, 2)
+  terms             Json      @default("{}")
+  effectiveFrom     DateTime  @map("effective_from") @db.Date
+  effectiveTo       DateTime? @map("effective_to") @db.Date
+  status            String    @default("active") @db.VarChar(32)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  corporateClient CorporateClient @relation(fields: [corporateClientId], references: [id])
+
+  @@unique([tenantId, contractNumber])
+  @@index([corporateClientId])
+  @@map("corporate_contracts")
+  @@schema("billing")
+}
+
+model CreditLimit {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  corporateClientId String   @unique @map("corporate_client_id") @db.Uuid
+  creditLimit       Decimal  @map("credit_limit") @db.Decimal(14, 2)
+  usedAmount        Decimal  @default(0) @map("used_amount") @db.Decimal(14, 2)
+  availableAmount   Decimal  @map("available_amount") @db.Decimal(14, 2)
+  alertThreshold    Decimal? @map("alert_threshold") @db.Decimal(5, 2)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  corporateClient CorporateClient @relation(fields: [corporateClientId], references: [id])
+
+  @@map("credit_limits")
+  @@schema("billing")
+}
+
+model InsuranceTPA {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  contactEmail   String?  @map("contact_email") @db.VarChar(255)
+  contactPhone   String?  @map("contact_phone") @db.VarChar(20)
+  apiEndpoint    String?  @map("api_endpoint")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  claims InsuranceClaim[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("insurance_tpas")
+  @@schema("billing")
+}
+
+model InsuranceClaim {
+  id               String      @id @default(uuid()) @db.Uuid
+  tenantId         String      @map("tenant_id") @db.Uuid
+  organizationId   String      @map("organization_id") @db.Uuid
+  branchId         String      @map("branch_id") @db.Uuid
+  invoiceId        String      @map("invoice_id") @db.Uuid
+  tpaId            String      @map("tpa_id") @db.Uuid
+  claimNumber      String      @map("claim_number") @db.VarChar(32)
+  policyNumber     String      @map("policy_number") @db.VarChar(64)
+  patientId        String      @map("patient_id") @db.Uuid
+  claimedAmount    Decimal     @map("claimed_amount") @db.Decimal(14, 2)
+  approvedAmount   Decimal?    @map("approved_amount") @db.Decimal(14, 2)
+  settledAmount    Decimal?    @map("settled_amount") @db.Decimal(14, 2)
+  status           ClaimStatus @default(DRAFT)
+  submittedAt      DateTime?   @map("submitted_at") @db.Timestamptz
+  approvedAt       DateTime?   @map("approved_at") @db.Timestamptz
+  settledAt        DateTime?   @map("settled_at") @db.Timestamptz
+  rejectionReason  String?     @map("rejection_reason")
+  metadata         Json        @default("{}")
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  invoice Invoice      @relation(fields: [invoiceId], references: [id])
+  tpa     InsuranceTPA @relation(fields: [tpaId], references: [id])
+  lines   ClaimLine[]
+
+  @@unique([tenantId, claimNumber])
+  @@index([invoiceId])
+  @@index([tenantId, status])
+  @@map("insurance_claims")
+  @@schema("billing")
+}
+
+model ClaimLine {
+  id          String  @id @default(uuid()) @db.Uuid
+  claimId     String  @map("claim_id") @db.Uuid
+  description String  @db.VarChar(255)
+  amount      Decimal @db.Decimal(14, 2)
+  approvedAmount Decimal? @map("approved_amount") @db.Decimal(14, 2)
+
+  claim InsuranceClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([claimId])
+  @@map("claim_lines")
+  @@schema("billing")
+}
+
+model FranchiseSettlement {
+  id                String           @id @default(uuid()) @db.Uuid
+  tenantId          String           @map("tenant_id") @db.Uuid
+  organizationId    String           @map("organization_id") @db.Uuid
+  franchiseBranchId String           @map("franchise_branch_id") @db.Uuid
+  parentBranchId    String           @map("parent_branch_id") @db.Uuid
+  settlementNumber  String           @map("settlement_number") @db.VarChar(32)
+  periodStart       DateTime         @map("period_start") @db.Date
+  periodEnd         DateTime         @map("period_end") @db.Date
+  grossRevenue      Decimal          @map("gross_revenue") @db.Decimal(14, 2)
+  revenueSharePct   Decimal          @map("revenue_share_pct") @db.Decimal(5, 2)
+  franchiseShare    Decimal          @map("franchise_share") @db.Decimal(14, 2)
+  hqShare           Decimal          @map("hq_share") @db.Decimal(14, 2)
+  royaltyAmount     Decimal          @default(0) @map("royalty_amount") @db.Decimal(14, 2)
+  commissionAmount  Decimal          @default(0) @map("commission_amount") @db.Decimal(14, 2)
+  netSettlement     Decimal          @map("net_settlement") @db.Decimal(14, 2)
+  status            SettlementStatus @default(PENDING)
+  approvedAt        DateTime?        @map("approved_at") @db.Timestamptz
+  paidAt            DateTime?        @map("paid_at") @db.Timestamptz
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, settlementNumber])
+  @@index([franchiseBranchId])
+  @@map("franchise_settlements")
+  @@schema("billing")
+}
+
+model RevenueShareRule {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  franchiseBranchId String   @map("franchise_branch_id") @db.Uuid
+  revenueSharePct   Decimal  @map("revenue_share_pct") @db.Decimal(5, 2)
+  royaltyPct        Decimal  @default(0) @map("royalty_pct") @db.Decimal(5, 2)
+  commissionPct     Decimal  @default(0) @map("commission_pct") @db.Decimal(5, 2)
+  effectiveFrom     DateTime @map("effective_from") @db.Date
+  effectiveTo       DateTime? @map("effective_to") @db.Date
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, franchiseBranchId])
+  @@map("revenue_share_rules")
+  @@schema("billing")
+}
+
+model GstLine {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  invoiceId      String   @map("invoice_id") @db.Uuid
+  hsnSacCode     String   @map("hsn_sac_code") @db.VarChar(16)
+  taxableValue   Decimal  @map("taxable_value") @db.Decimal(14, 2)
+  cgstRate       Decimal  @map("cgst_rate") @db.Decimal(5, 2)
+  sgstRate       Decimal  @map("sgst_rate") @db.Decimal(5, 2)
+  igstRate       Decimal  @map("igst_rate") @db.Decimal(5, 2)
+  cgstAmount     Decimal  @map("cgst_amount") @db.Decimal(14, 2)
+  sgstAmount     Decimal  @map("sgst_amount") @db.Decimal(14, 2)
+  igstAmount     Decimal  @map("igst_amount") @db.Decimal(14, 2)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("gst_lines")
+  @@schema("billing")
+}
+
+model MonthlyStatement {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  organizationId    String   @map("organization_id") @db.Uuid
+  corporateClientId String   @map("corporate_client_id") @db.Uuid
+  statementNumber   String   @map("statement_number") @db.VarChar(32)
+  periodMonth       Int      @map("period_month")
+  periodYear        Int      @map("period_year")
+  openingBalance    Decimal  @default(0) @map("opening_balance") @db.Decimal(14, 2)
+  totalInvoiced     Decimal  @default(0) @map("total_invoiced") @db.Decimal(14, 2)
+  totalPaid         Decimal  @default(0) @map("total_paid") @db.Decimal(14, 2)
+  closingBalance    Decimal  @default(0) @map("closing_balance") @db.Decimal(14, 2)
+  generatedAt       DateTime @default(now()) @map("generated_at") @db.Timestamptz
+  pdfS3Key          String?  @map("pdf_s3_key")
+
+  corporateClient CorporateClient @relation(fields: [corporateClientId], references: [id])
+
+  @@unique([tenantId, statementNumber])
+  @@index([corporateClientId])
+  @@map("monthly_statements")
+  @@schema("billing")
+}
+
+model OutstandingBalance {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  entityType     String   @map("entity_type") @db.VarChar(32)
+  entityId       String   @map("entity_id") @db.Uuid
+  totalOutstanding Decimal @map("total_outstanding") @db.Decimal(14, 2)
+  overdueAmount  Decimal  @default(0) @map("overdue_amount") @db.Decimal(14, 2)
+  oldestDueDate  DateTime? @map("oldest_due_date") @db.Date
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([tenantId, entityType, entityId])
+  @@index([tenantId])
+  @@map("outstanding_balances")
+  @@schema("billing")
+}
+
+model PaymentGatewayConfig {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  provider       String   @db.VarChar(32)
+  isActive       Boolean  @default(true) @map("is_active")
+  isTestMode     Boolean  @default(true) @map("is_test_mode")
+  apiKey         String?  @map("api_key")
+  apiSecret      String?  @map("api_secret")
+  webhookSecret  String?  @map("webhook_secret")
+  config         Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, provider])
+  @@map("payment_gateway_configs")
+  @@schema("billing")
+}
+
+model BillingSequence {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  branchId String @map("branch_id") @db.Uuid
+  seqType  String @map("seq_type") @db.VarChar(32)
+  prefix   String @db.VarChar(16)
+  lastSeq  Int    @default(0) @map("last_seq")
+
+  @@unique([tenantId, branchId, seqType])
+  @@map("billing_sequences")
+  @@schema("billing")
+}
+
+model SurchargeRule {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  surchargeType  String   @map("surcharge_type") @db.VarChar(32)
+  name           String   @db.VarChar(128)
+  amount         Decimal? @db.Decimal(14, 2)
+  percent        Decimal? @db.Decimal(5, 2)
+  billingCodeId  String?  @map("billing_code_id") @db.Uuid
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, surchargeType])
+  @@map("surcharge_rules")
+  @@schema("billing")
+}
+
+// ─── INVENTORY SCHEMA ────────────────────────────────────────────────────────
+
+enum InventoryItemType {
+  REAGENT
+  KIT
+  CONSUMABLE
+
+  @@schema("inventory")
+}
+
+enum PoStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+
+  @@schema("inventory")
+}
+
+enum TransferStatus {
+  DRAFT
+  IN_TRANSIT
+  RECEIVED
+  CANCELLED
+
+  @@schema("inventory")
+}
+
+enum LotStatus {
+  AVAILABLE
+  LOW_STOCK
+  EXPIRED
+  QUARANTINE
+  DEPLETED
+
+  @@schema("inventory")
+}
+
+model Vendor {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  contactPerson  String?  @map("contact_person") @db.VarChar(128)
+  email          String?  @db.VarChar(255)
+  phone          String?  @db.VarChar(20)
+  gstin          String?  @db.VarChar(15)
+  address        Json     @default("{}")
+  paymentTermsDays Int    @default(30) @map("payment_terms_days")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  purchaseOrders PurchaseOrder[]
+  items          InventoryItem[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("vendors")
+  @@schema("inventory")
+}
+
+model InventoryItem {
+  id             String            @id @default(uuid()) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  organizationId String            @map("organization_id") @db.Uuid
+  itemType       InventoryItemType @map("item_type")
+  sku            String            @db.VarChar(64)
+  name           String            @db.VarChar(255)
+  description    String?
+  category       String?           @db.VarChar(64)
+  unit           String            @default("unit") @db.VarChar(16)
+  reorderLevel   Decimal           @default(0) @map("reorder_level") @db.Decimal(12, 2)
+  vendorId       String?           @map("vendor_id") @db.Uuid
+  storageTemp    String?           @map("storage_temp") @db.VarChar(32)
+  metadata       Json              @default("{}")
+  isActive       Boolean           @default(true) @map("is_active")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  vendor           Vendor?           @relation(fields: [vendorId], references: [id])
+  lots             StockLot[]
+  purchaseOrderLines PurchaseOrderLine[]
+  transferLines    StockTransferLine[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId, itemType])
+  @@map("inventory_items")
+  @@schema("inventory")
+}
+
+model StockLot {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  branchId       String    @map("branch_id") @db.Uuid
+  itemId         String    @map("item_id") @db.Uuid
+  lotNumber      String    @map("lot_number") @db.VarChar(64)
+  batchNumber    String?   @map("batch_number") @db.VarChar(64)
+  quantity       Decimal   @db.Decimal(12, 2)
+  reservedQty    Decimal   @default(0) @map("reserved_qty") @db.Decimal(12, 2)
+  availableQty   Decimal   @map("available_qty") @db.Decimal(12, 2)
+  unitCost       Decimal?  @map("unit_cost") @db.Decimal(14, 2)
+  manufacturedAt DateTime? @map("manufactured_at") @db.Date
+  expiresAt      DateTime? @map("expires_at") @db.Date
+  receivedAt     DateTime  @default(now()) @map("received_at") @db.Timestamptz
+  status         LotStatus @default(AVAILABLE)
+  location       String?   @db.VarChar(64)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  item InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@unique([tenantId, branchId, itemId, lotNumber])
+  @@index([expiresAt])
+  @@index([tenantId, branchId, status])
+  @@map("stock_lots")
+  @@schema("inventory")
+}
+
+model PurchaseOrder {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  vendorId       String   @map("vendor_id") @db.Uuid
+  poNumber       String   @map("po_number") @db.VarChar(32)
+  status         PoStatus @default(DRAFT)
+  totalAmount    Decimal  @default(0) @map("total_amount") @db.Decimal(14, 2)
+  expectedAt     DateTime? @map("expected_at") @db.Date
+  notes          String?
+  createdBy      String?  @map("created_by") @db.Uuid
+  approvedAt     DateTime? @map("approved_at") @db.Timestamptz
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  vendor Vendor              @relation(fields: [vendorId], references: [id])
+  lines  PurchaseOrderLine[]
+
+  @@unique([tenantId, poNumber])
+  @@index([tenantId, status])
+  @@map("purchase_orders")
+  @@schema("inventory")
+}
+
+model PurchaseOrderLine {
+  id              String  @id @default(uuid()) @db.Uuid
+  purchaseOrderId String  @map("purchase_order_id") @db.Uuid
+  itemId          String  @map("item_id") @db.Uuid
+  quantity        Decimal @db.Decimal(12, 2)
+  unitPrice       Decimal @map("unit_price") @db.Decimal(14, 2)
+  receivedQty     Decimal @default(0) @map("received_qty") @db.Decimal(12, 2)
+  lineTotal       Decimal @map("line_total") @db.Decimal(14, 2)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  item          InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([purchaseOrderId])
+  @@map("purchase_order_lines")
+  @@schema("inventory")
+}
+
+model StockTransfer {
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  transferNumber String         @map("transfer_number") @db.VarChar(32)
+  fromBranchId   String         @map("from_branch_id") @db.Uuid
+  toBranchId     String         @map("to_branch_id") @db.Uuid
+  status         TransferStatus @default(DRAFT)
+  notes          String?
+  shippedAt      DateTime?      @map("shipped_at") @db.Timestamptz
+  receivedAt     DateTime?      @map("received_at") @db.Timestamptz
+  createdBy      String?        @map("created_by") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  lines StockTransferLine[]
+
+  @@unique([tenantId, transferNumber])
+  @@index([tenantId, status])
+  @@map("stock_transfers")
+  @@schema("inventory")
+}
+
+model StockTransferLine {
+  id              String  @id @default(uuid()) @db.Uuid
+  stockTransferId String  @map("stock_transfer_id") @db.Uuid
+  itemId          String  @map("item_id") @db.Uuid
+  lotNumber       String  @map("lot_number") @db.VarChar(64)
+  quantity        Decimal @db.Decimal(12, 2)
+
+  stockTransfer StockTransfer @relation(fields: [stockTransferId], references: [id], onDelete: Cascade)
+  item          InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([stockTransferId])
+  @@map("stock_transfer_lines")
+  @@schema("inventory")
+}
+
+// ─── QC SCHEMA ───────────────────────────────────────────────────────────────
+
+enum QcRunStatus {
+  PENDING
+  IN_PROGRESS
+  PASSED
+  FAILED
+  REJECTED
+
+  @@schema("qc")
+}
+
+enum CapaStatus {
+  OPEN
+  INVESTIGATING
+  CORRECTIVE_ACTION
+  VERIFIED
+  CLOSED
+
+  @@schema("qc")
+}
+
+model QcMaterial {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  analyte        String   @db.VarChar(64)
+  level          String   @db.VarChar(16)
+  targetMean     Decimal  @map("target_mean") @db.Decimal(14, 4)
+  targetSd       Decimal  @map("target_sd") @db.Decimal(14, 4)
+  unit           String?  @db.VarChar(16)
+  lotNumber      String?  @map("lot_number") @db.VarChar(64)
+  expiresAt      DateTime? @map("expires_at") @db.Date
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  runs QcRun[]
+
+  @@unique([tenantId, code])
+  @@map("qc_materials")
+  @@schema("qc")
+}
+
+model QcRun {
+  id             String      @id @default(uuid()) @db.Uuid
+  tenantId       String      @map("tenant_id") @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  branchId       String      @map("branch_id") @db.Uuid
+  materialId     String      @map("material_id") @db.Uuid
+  deviceId       String?     @map("device_id") @db.Uuid
+  runNumber      String      @map("run_number") @db.VarChar(32)
+  status         QcRunStatus @default(PENDING)
+  runAt          DateTime    @default(now()) @map("run_at") @db.Timestamptz
+  operatorId     String?     @map("operator_id") @db.Uuid
+  notes          String?
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  material   QcMaterial      @relation(fields: [materialId], references: [id])
+  dataPoints QcDataPoint[]
+  violations WestgardViolation[]
+  failures   QcFailure[]
+
+  @@unique([tenantId, runNumber])
+  @@index([tenantId, branchId, runAt(sort: Desc)])
+  @@map("qc_runs")
+  @@schema("qc")
+}
+
+model QcDataPoint {
+  id        String   @id @default(uuid()) @db.Uuid
+  runId     String   @map("run_id") @db.Uuid
+  value     Decimal  @db.Decimal(14, 4)
+  zScore    Decimal? @map("z_score") @db.Decimal(8, 4)
+  isOutlier Boolean  @default(false) @map("is_outlier")
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz
+
+  run QcRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("qc_data_points")
+  @@schema("qc")
+}
+
+model WestgardViolation {
+  id          String   @id @default(uuid()) @db.Uuid
+  runId       String   @map("run_id") @db.Uuid
+  ruleCode    String   @map("rule_code") @db.VarChar(16)
+  description String   @db.VarChar(255)
+  severity    String   @default("warning") @db.VarChar(16)
+  detectedAt  DateTime @default(now()) @map("detected_at") @db.Timestamptz
+
+  run QcRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("westgard_violations")
+  @@schema("qc")
+}
+
+model CalibrationLog {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  branchId       String    @map("branch_id") @db.Uuid
+  deviceId       String    @map("device_id") @db.Uuid
+  calibratedAt   DateTime  @map("calibrated_at") @db.Timestamptz
+  nextDueAt      DateTime? @map("next_due_at") @db.Timestamptz
+  performedBy    String?   @map("performed_by") @db.Uuid
+  certificateRef String?   @map("certificate_ref") @db.VarChar(64)
+  notes          String?
+  metadata       Json      @default("{}")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, deviceId, calibratedAt(sort: Desc)])
+  @@map("calibration_logs")
+  @@schema("qc")
+}
+
+model QcFailure {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  runId       String   @map("run_id") @db.Uuid
+  failureType String   @map("failure_type") @db.VarChar(32)
+  description String
+  resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  run  QcRun       @relation(fields: [runId], references: [id])
+  capa CapaRecord?
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("qc_failures")
+  @@schema("qc")
+}
+
+model CapaRecord {
+  id           String     @id @default(uuid()) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  failureId    String     @unique @map("failure_id") @db.Uuid
+  capaNumber   String     @map("capa_number") @db.VarChar(32)
+  status       CapaStatus @default(OPEN)
+  rootCause    String?    @map("root_cause")
+  correctiveAction String? @map("corrective_action")
+  preventiveAction String? @map("preventive_action")
+  assignedTo   String?    @map("assigned_to") @db.Uuid
+  dueDate      DateTime?  @map("due_date") @db.Date
+  closedAt     DateTime?  @map("closed_at") @db.Timestamptz
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  failure QcFailure @relation(fields: [failureId], references: [id])
+
+  @@unique([tenantId, capaNumber])
+  @@map("capa_records")
+  @@schema("qc")
+}
+
+// ─── CRM SCHEMA ──────────────────────────────────────────────────────────────
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  WON
+  LOST
+
+  @@schema("crm")
+}
+
+enum CampStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+
+  @@schema("crm")
+}
+
+model ReferringDoctor {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  specialty      String?  @db.VarChar(64)
+  qualification  String?  @db.VarChar(128)
+  registrationNo String?  @map("registration_no") @db.VarChar(64)
+  phone          String?  @db.VarChar(20)
+  email          String?  @db.VarChar(255)
+  clinicName     String?  @map("clinic_name") @db.VarChar(255)
+  address        Json     @default("{}")
+  commissionPct  Decimal  @default(0) @map("commission_pct") @db.Decimal(5, 2)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  referrals DoctorReferral[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("referring_doctors")
+  @@schema("crm")
+}
+
+model DoctorReferral {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  doctorId       String   @map("doctor_id") @db.Uuid
+  patientId      String?  @map("patient_id") @db.Uuid
+  referralNumber String   @map("referral_number") @db.VarChar(32)
+  orderId        String?  @map("order_id") @db.Uuid
+  orderAmount    Decimal? @map("order_amount") @db.Decimal(14, 2)
+  commissionAmount Decimal? @map("commission_amount") @db.Decimal(14, 2)
+  referredAt     DateTime @default(now()) @map("referred_at") @db.Timestamptz
+  notes          String?
+
+  doctor ReferringDoctor @relation(fields: [doctorId], references: [id])
+
+  @@unique([tenantId, referralNumber])
+  @@index([doctorId])
+  @@map("doctor_referrals")
+  @@schema("crm")
+}
+
+model CorporateLead {
+  id             String     @id @default(uuid()) @db.Uuid
+  tenantId       String     @map("tenant_id") @db.Uuid
+  organizationId String     @map("organization_id") @db.Uuid
+  companyName    String     @map("company_name") @db.VarChar(255)
+  contactPerson  String?    @map("contact_person") @db.VarChar(128)
+  email          String?    @db.VarChar(255)
+  phone          String?    @db.VarChar(20)
+  employeeCount  Int?       @map("employee_count")
+  status         LeadStatus @default(NEW)
+  estimatedValue Decimal?   @map("estimated_value") @db.Decimal(14, 2)
+  assignedTo     String?    @map("assigned_to") @db.Uuid
+  source         String?    @db.VarChar(64)
+  notes          String?
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([tenantId, status])
+  @@map("corporate_leads")
+  @@schema("crm")
+}
+
+model Camp {
+  id             String     @id @default(uuid()) @db.Uuid
+  tenantId       String     @map("tenant_id") @db.Uuid
+  organizationId String     @map("organization_id") @db.Uuid
+  branchId       String     @map("branch_id") @db.Uuid
+  campCode       String     @map("camp_code") @db.VarChar(32)
+  name           String     @db.VarChar(255)
+  location       String?    @db.VarChar(255)
+  startDate      DateTime   @map("start_date") @db.Date
+  endDate        DateTime   @map("end_date") @db.Date
+  status         CampStatus @default(PLANNED)
+  targetCount    Int?       @map("target_count")
+  actualCount    Int        @default(0) @map("actual_count")
+  packageIds     Json       @default("[]") @map("package_ids")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  registrations CampRegistration[]
+
+  @@unique([tenantId, campCode])
+  @@index([tenantId, status])
+  @@map("camps")
+  @@schema("crm")
+}
+
+model CampRegistration {
+  id        String   @id @default(uuid()) @db.Uuid
+  campId    String   @map("camp_id") @db.Uuid
+  patientId String?  @map("patient_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  phone     String?  @db.VarChar(20)
+  registeredAt DateTime @default(now()) @map("registered_at") @db.Timestamptz
+
+  camp Camp @relation(fields: [campId], references: [id], onDelete: Cascade)
+
+  @@index([campId])
+  @@map("camp_registrations")
+  @@schema("crm")
+}
+
+model SalesLead {
+  id             String     @id @default(uuid()) @db.Uuid
+  tenantId       String     @map("tenant_id") @db.Uuid
+  organizationId String     @map("organization_id") @db.Uuid
+  leadNumber     String     @map("lead_number") @db.VarChar(32)
+  contactName    String     @map("contact_name") @db.VarChar(255)
+  company        String?    @db.VarChar(255)
+  phone          String?    @db.VarChar(20)
+  email          String?    @db.VarChar(255)
+  status         LeadStatus @default(NEW)
+  source         String?    @db.VarChar(64)
+  assignedTo     String?    @map("assigned_to") @db.Uuid
+  value          Decimal?   @db.Decimal(14, 2)
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  activities SalesActivity[]
+
+  @@unique([tenantId, leadNumber])
+  @@index([tenantId, status])
+  @@map("sales_leads")
+  @@schema("crm")
+}
+
+model SalesActivity {
+  id          String   @id @default(uuid()) @db.Uuid
+  leadId      String   @map("lead_id") @db.Uuid
+  activityType String  @map("activity_type") @db.VarChar(32)
+  notes       String?
+  outcome     String?  @db.VarChar(64)
+  performedBy String?  @map("performed_by") @db.Uuid
+  performedAt DateTime @default(now()) @map("performed_at") @db.Timestamptz
+
+  lead SalesLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@map("sales_activities")
+  @@schema("crm")
+}
+
+model SalesTarget {
+  id             String  @id @default(uuid()) @db.Uuid
+  tenantId       String  @map("tenant_id") @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  userId         String  @map("user_id") @db.Uuid
+  periodMonth    Int     @map("period_month")
+  periodYear     Int     @map("period_year")
+  targetAmount   Decimal @map("target_amount") @db.Decimal(14, 2)
+  achievedAmount Decimal @default(0) @map("achieved_amount") @db.Decimal(14, 2)
+
+  @@unique([tenantId, userId, periodMonth, periodYear])
+  @@map("sales_targets")
+  @@schema("crm")
+}
+
+// ─── EHR SCHEMA ──────────────────────────────────────────────────────────────
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+
+  @@schema("ehr")
+}
+
+enum ConsultationStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+
+  @@schema("ehr")
+}
+
+enum TeleconsultStatus {
+  SCHEDULED
+  WAITING
+  IN_CALL
+  COMPLETED
+  CANCELLED
+
+  @@schema("ehr")
+}
+
+model EhrDoctor {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  specialty      String?  @db.VarChar(64)
+  qualification  String?  @db.VarChar(128)
+  registrationNo String?  @map("registration_no") @db.VarChar(64)
+  consultationFee Decimal @default(0) @map("consultation_fee") @db.Decimal(14, 2)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  appointments   Appointment[]
+  consultations  Consultation[]
+  prescriptions  Prescription[]
+
+  @@unique([tenantId, code])
+  @@map("ehr_doctors")
+  @@schema("ehr")
+}
+
+model Appointment {
+  id             String            @id @default(uuid()) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  organizationId String            @map("organization_id") @db.Uuid
+  branchId       String            @map("branch_id") @db.Uuid
+  patientId      String            @map("patient_id") @db.Uuid
+  doctorId       String            @map("doctor_id") @db.Uuid
+  appointmentNumber String         @map("appointment_number") @db.VarChar(32)
+  scheduledAt    DateTime          @map("scheduled_at") @db.Timestamptz
+  durationMins   Int               @default(15) @map("duration_mins")
+  status         AppointmentStatus @default(SCHEDULED)
+  reason         String?
+  notes          String?
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+
+  doctor EhrDoctor @relation(fields: [doctorId], references: [id])
+
+  @@unique([tenantId, appointmentNumber])
+  @@index([tenantId, doctorId, scheduledAt])
+  @@index([patientId])
+  @@map("appointments")
+  @@schema("ehr")
+}
+
+model Consultation {
+  id             String             @id @default(uuid()) @db.Uuid
+  tenantId       String             @map("tenant_id") @db.Uuid
+  organizationId String             @map("organization_id") @db.Uuid
+  branchId       String             @map("branch_id") @db.Uuid
+  patientId      String             @map("patient_id") @db.Uuid
+  doctorId       String             @map("doctor_id") @db.Uuid
+  appointmentId  String?            @map("appointment_id") @db.Uuid
+  consultationNumber String         @map("consultation_number") @db.VarChar(32)
+  status         ConsultationStatus @default(SCHEDULED)
+  chiefComplaint String?            @map("chief_complaint")
+  diagnosis      String?
+  startedAt      DateTime?          @map("started_at") @db.Timestamptz
+  completedAt    DateTime?          @map("completed_at") @db.Timestamptz
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz
+
+  doctor        EhrDoctor      @relation(fields: [doctorId], references: [id])
+  clinicalNotes ClinicalNote[]
+  prescriptions Prescription[]
+
+  @@unique([tenantId, consultationNumber])
+  @@index([patientId])
+  @@map("consultations")
+  @@schema("ehr")
+}
+
+model ClinicalNote {
+  id             String   @id @default(uuid()) @db.Uuid
+  consultationId String   @map("consultation_id") @db.Uuid
+  noteType       String   @map("note_type") @db.VarChar(32)
+  content        String
+  authoredBy     String?  @map("authored_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+
+  @@index([consultationId])
+  @@map("clinical_notes")
+  @@schema("ehr")
+}
+
+model Prescription {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  consultationId String   @map("consultation_id") @db.Uuid
+  doctorId       String   @map("doctor_id") @db.Uuid
+  patientId      String   @map("patient_id") @db.Uuid
+  prescriptionNumber String @map("prescription_number") @db.VarChar(32)
+  issuedAt       DateTime @default(now()) @map("issued_at") @db.Timestamptz
+  notes          String?
+
+  consultation Consultation       @relation(fields: [consultationId], references: [id])
+  doctor       EhrDoctor          @relation(fields: [doctorId], references: [id])
+  lines        PrescriptionLine[]
+
+  @@unique([tenantId, prescriptionNumber])
+  @@index([patientId])
+  @@map("prescriptions")
+  @@schema("ehr")
+}
+
+model PrescriptionLine {
+  id             String  @id @default(uuid()) @db.Uuid
+  prescriptionId String  @map("prescription_id") @db.Uuid
+  drugName       String  @map("drug_name") @db.VarChar(255)
+  dosage         String? @db.VarChar(64)
+  frequency      String? @db.VarChar(64)
+  duration       String? @db.VarChar(64)
+  instructions   String?
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  @@index([prescriptionId])
+  @@map("prescription_lines")
+  @@schema("ehr")
+}
+
+model TeleconsultSession {
+  id             String            @id @default(uuid()) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  organizationId String            @map("organization_id") @db.Uuid
+  branchId       String            @map("branch_id") @db.Uuid
+  patientId      String            @map("patient_id") @db.Uuid
+  doctorId       String            @map("doctor_id") @db.Uuid
+  sessionNumber  String            @map("session_number") @db.VarChar(32)
+  status         TeleconsultStatus @default(SCHEDULED)
+  scheduledAt    DateTime          @map("scheduled_at") @db.Timestamptz
+  startedAt      DateTime?         @map("started_at") @db.Timestamptz
+  endedAt        DateTime?         @map("ended_at") @db.Timestamptz
+  meetingUrl     String?           @map("meeting_url")
+  recordingUrl   String?           @map("recording_url")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, sessionNumber])
+  @@index([patientId])
+  @@map("teleconsult_sessions")
+  @@schema("ehr")
+}
+
+// ─── ABDM SCHEMA ───────────────────────────────────────────────────────────────
+
+enum AbhaStatus {
+  PENDING
+  VERIFIED
+  LINKED
+  REVOKED
+
+  @@schema("abdm")
+}
+
+enum ConsentRequestStatus {
+  REQUESTED
+  GRANTED
+  DENIED
+  EXPIRED
+  REVOKED
+
+  @@schema("abdm")
+}
+
+enum FhirResourceType {
+  Patient
+  Observation
+  DiagnosticReport
+  DocumentReference
+  Bundle
+
+  @@schema("abdm")
+}
+
+model AbhaProfile {
+  id             String     @id @default(uuid()) @db.Uuid
+  tenantId       String     @map("tenant_id") @db.Uuid
+  patientId      String     @map("patient_id") @db.Uuid
+  abhaNumber     String     @map("abha_number") @db.VarChar(17)
+  abhaAddress    String?    @map("abha_address") @db.VarChar(128)
+  status         AbhaStatus @default(PENDING)
+  verifiedAt     DateTime?  @map("verified_at") @db.Timestamptz
+  kycMethod      String?    @map("kyc_method") @db.VarChar(32)
+  metadata       Json       @default("{}")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([tenantId, patientId])
+  @@unique([abhaNumber])
+  @@index([tenantId])
+  @@map("abha_profiles")
+  @@schema("abdm")
+}
+
+model HealthRecordLink {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  patientId      String   @map("patient_id") @db.Uuid
+  abhaNumber     String   @map("abha_number") @db.VarChar(17)
+  hipId          String   @map("hip_id") @db.VarChar(64)
+  careContextId  String   @map("care_context_id") @db.VarChar(128)
+  referenceType  String   @map("reference_type") @db.VarChar(32)
+  referenceId    String   @map("reference_id") @db.Uuid
+  linkedAt       DateTime @default(now()) @map("linked_at") @db.Timestamptz
+
+  @@unique([tenantId, careContextId])
+  @@index([patientId])
+  @@map("health_record_links")
+  @@schema("abdm")
+}
+
+model ConsentArtifact {
+  id             String               @id @default(uuid()) @db.Uuid
+  tenantId       String               @map("tenant_id") @db.Uuid
+  patientId      String               @map("patient_id") @db.Uuid
+  abhaNumber     String               @map("abha_number") @db.VarChar(17)
+  consentId      String               @map("consent_id") @db.VarChar(128)
+  purpose        String               @db.VarChar(128)
+  hiTypes        Json                 @default("[]") @map("hi_types")
+  dateFrom       DateTime             @map("date_from") @db.Timestamptz
+  dateTo         DateTime             @map("date_to") @db.Timestamptz
+  status         ConsentRequestStatus @default(REQUESTED)
+  grantedAt      DateTime?            @map("granted_at") @db.Timestamptz
+  artefactId     String?              @map("artefact_id") @db.VarChar(128)
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([consentId])
+  @@index([tenantId, patientId])
+  @@map("consent_artifacts")
+  @@schema("abdm")
+}
+
+model FhirResource {
+  id             String           @id @default(uuid()) @db.Uuid
+  tenantId       String           @map("tenant_id") @db.Uuid
+  resourceType   FhirResourceType @map("resource_type")
+  resourceId     String           @map("resource_id") @db.VarChar(128)
+  patientId      String?          @map("patient_id") @db.Uuid
+  version        Int              @default(1)
+  content        Json
+  publishedAt    DateTime?        @map("published_at") @db.Timestamptz
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([tenantId, resourceType, resourceId])
+  @@index([patientId])
+  @@map("fhir_resources")
+  @@schema("abdm")
+}
+
+model AbdmTransaction {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  transactionId  String   @map("transaction_id") @db.VarChar(128)
+  requestType    String   @map("request_type") @db.VarChar(64)
+  status         String   @default("pending") @db.VarChar(32)
+  requestPayload Json?    @map("request_payload")
+  responsePayload Json?   @map("response_payload")
+  errorMessage   String?  @map("error_message")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz
+
+  @@unique([transactionId])
+  @@index([tenantId, requestType, createdAt(sort: Desc)])
+  @@map("abdm_transactions")
+  @@schema("abdm")
+}
+
+// ─── ANALYTICS SCHEMA ──────────────────────────────────────────────────────────
+
+model DashboardConfig {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(128)
+  dashboardType  String   @map("dashboard_type") @db.VarChar(32)
+  config         Json     @default("{}")
+  supersetId     String?  @map("superset_id") @db.VarChar(64)
+  isDefault      Boolean  @default(false) @map("is_default")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, dashboardType])
+  @@map("dashboard_configs")
+  @@schema("analytics")
+}
+
+model MaterializedViewMeta {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  viewName       String    @map("view_name") @db.VarChar(128)
+  sourceSchema   String    @map("source_schema") @db.VarChar(32)
+  refreshCron    String?   @map("refresh_cron") @db.VarChar(32)
+  lastRefreshedAt DateTime? @map("last_refreshed_at") @db.Timestamptz
+  rowCount       BigInt?   @map("row_count")
+  clickhouseTable String?  @map("clickhouse_table") @db.VarChar(128)
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, viewName])
+  @@map("materialized_view_meta")
+  @@schema("analytics")
+}
+
+model AnalyticsQueryLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  queryType   String   @map("query_type") @db.VarChar(32)
+  durationMs  Int      @map("duration_ms")
+  rowCount    Int?     @map("row_count")
+  source      String   @default("clickhouse") @db.VarChar(16)
+  executedAt  DateTime @default(now()) @map("executed_at") @db.Timestamptz
+
+  @@index([tenantId, executedAt(sort: Desc)])
+  @@map("analytics_query_logs")
+  @@schema("analytics")
+}
+
+model PredictiveModel {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  modelType      String   @map("model_type") @db.VarChar(32)
+  name           String   @db.VarChar(128)
+  version        String   @default("1.0") @db.VarChar(16)
+  accuracy       Decimal? @db.Decimal(5, 2)
+  lastTrainedAt  DateTime? @map("last_trained_at") @db.Timestamptz
+  config         Json     @default("{}")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, modelType])
+  @@map("predictive_models")
+  @@schema("analytics")
+}
+
+// ─── AI SCHEMA ─────────────────────────────────────────────────────────────────
+
+enum AiInferenceType {
+  ABNORMAL_DETECTION
+  CRITICAL_VALUE
+  INTERPRETATION
+  RISK_PREDICTION
+  INVENTORY_FORECAST
+  DEMAND_FORECAST
+  REVENUE_FORECAST
+  STAFF_PLANNING
+  CHAT
+  VOICE
+
+  @@schema("ai")
+}
+
+model AiModelConfig {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  modelKey       String   @map("model_key") @db.VarChar(64)
+  provider       String   @default("internal") @db.VarChar(32)
+  endpoint       String?
+  apiKeyRef      String?  @map("api_key_ref") @db.VarChar(64)
+  config         Json     @default("{}")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, modelKey])
+  @@map("ai_model_configs")
+  @@schema("ai")
+}
+
+model AiInferenceLog {
+  id             String          @id @default(uuid()) @db.Uuid
+  tenantId       String          @map("tenant_id") @db.Uuid
+  inferenceType  AiInferenceType @map("inference_type")
+  inputRef       String?         @map("input_ref") @db.VarChar(128)
+  output         Json
+  confidence     Decimal?        @db.Decimal(5, 2)
+  latencyMs      Int?            @map("latency_ms")
+  modelKey       String?         @map("model_key") @db.VarChar(64)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, inferenceType, createdAt(sort: Desc)])
+  @@map("ai_inference_logs")
+  @@schema("ai")
+}
+
+model ChatSession {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  patientId      String?  @map("patient_id") @db.Uuid
+  channel        String   @default("web") @db.VarChar(16)
+  status         String   @default("active") @db.VarChar(16)
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  messages ChatMessage[]
+
+  @@index([tenantId, patientId])
+  @@map("chat_sessions")
+  @@schema("ai")
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  sessionId String   @map("session_id") @db.Uuid
+  role      String   @db.VarChar(16)
+  content   String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("chat_messages")
+  @@schema("ai")
+}
+
+model WhatsAppSession {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  phone          String   @db.VarChar(20)
+  patientId      String?  @map("patient_id") @db.Uuid
+  waId           String?  @map("wa_id") @db.VarChar(64)
+  status         String   @default("active") @db.VarChar(16)
+  lastMessageAt  DateTime? @map("last_message_at") @db.Timestamptz
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, phone])
+  @@map("whatsapp_sessions")
+  @@schema("ai")
+}
+
+// ─── FIELD SERVICE SCHEMA ──────────────────────────────────────────────────────
+
+enum RouteStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+
+  @@schema("field")
+}
+
+enum CollectionStatus {
+  PENDING
+  EN_ROUTE
+  ARRIVED
+  COLLECTED
+  FAILED
+  CANCELLED
+
+  @@schema("field")
+}
+
+model Phlebotomist {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  employeeCode   String   @map("employee_code") @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  phone          String   @db.VarChar(20)
+  isActive       Boolean  @default(true) @map("is_active")
+  currentLat     Decimal? @map("current_lat") @db.Decimal(10, 7)
+  currentLng     Decimal? @map("current_lng") @db.Decimal(10, 7)
+  lastPingAt     DateTime? @map("last_ping_at") @db.Timestamptz
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  routes FieldRoute[]
+
+  @@unique([tenantId, employeeCode])
+  @@index([tenantId, branchId])
+  @@map("phlebotomists")
+  @@schema("field")
+}
+
+model FieldRoute {
+  id              String      @id @default(uuid()) @db.Uuid
+  tenantId        String      @map("tenant_id") @db.Uuid
+  organizationId  String      @map("organization_id") @db.Uuid
+  branchId        String      @map("branch_id") @db.Uuid
+  phlebotomistId  String      @map("phlebotomist_id") @db.Uuid
+  routeNumber     String      @map("route_number") @db.VarChar(32)
+  routeDate       DateTime    @map("route_date") @db.Date
+  status          RouteStatus @default(PLANNED)
+  totalStops      Int         @default(0) @map("total_stops")
+  completedStops  Int         @default(0) @map("completed_stops")
+  optimizedOrder  Json        @default("[]") @map("optimized_order")
+  startedAt       DateTime?   @map("started_at") @db.Timestamptz
+  completedAt     DateTime?   @map("completed_at") @db.Timestamptz
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  phlebotomist Phlebotomist @relation(fields: [phlebotomistId], references: [id])
+  stops        RouteStop[]
+
+  @@unique([tenantId, routeNumber])
+  @@index([tenantId, routeDate])
+  @@map("field_routes")
+  @@schema("field")
+}
+
+model RouteStop {
+  id             String           @id @default(uuid()) @db.Uuid
+  routeId        String           @map("route_id") @db.Uuid
+  stopOrder      Int              @map("stop_order")
+  patientId      String?          @map("patient_id") @db.Uuid
+  patientName    String           @map("patient_name") @db.VarChar(255)
+  address        Json             @default("{}")
+  lat            Decimal?         @db.Decimal(10, 7)
+  lng            Decimal?         @db.Decimal(10, 7)
+  scheduledAt    DateTime?        @map("scheduled_at") @db.Timestamptz
+  status         CollectionStatus @default(PENDING)
+  orderId        String?          @map("order_id") @db.Uuid
+  arrivedAt      DateTime?        @map("arrived_at") @db.Timestamptz
+  collectedAt    DateTime?        @map("collected_at") @db.Timestamptz
+  notes          String?
+
+  route   FieldRoute       @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  proof   CollectionProof?
+
+  @@index([routeId])
+  @@map("route_stops")
+  @@schema("field")
+}
+
+model GpsPing {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  phlebotomistId  String   @map("phlebotomist_id") @db.Uuid
+  lat             Decimal  @db.Decimal(10, 7)
+  lng             Decimal  @db.Decimal(10, 7)
+  accuracy        Decimal? @db.Decimal(8, 2)
+  speed           Decimal? @db.Decimal(8, 2)
+  recordedAt      DateTime @default(now()) @map("recorded_at") @db.Timestamptz
+
+  @@index([phlebotomistId, recordedAt(sort: Desc)])
+  @@map("gps_pings")
+  @@schema("field")
+}
+
+model CollectionProof {
+  id           String   @id @default(uuid()) @db.Uuid
+  stopId       String   @unique @map("stop_id") @db.Uuid
+  photoUrl     String?  @map("photo_url")
+  signatureUrl String?  @map("signature_url")
+  otpVerified  Boolean  @default(false) @map("otp_verified")
+  barcodeScanned String? @map("barcode_scanned") @db.VarChar(64)
+  collectedAt  DateTime @default(now()) @map("collected_at") @db.Timestamptz
+  metadata     Json     @default("{}")
+
+  stop RouteStop @relation(fields: [stopId], references: [id])
+
+  @@map("collection_proofs")
+  @@schema("field")
+}
+
+model FieldAttendance {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  phlebotomistId  String    @map("phlebotomist_id") @db.Uuid
+  checkInAt       DateTime  @map("check_in_at") @db.Timestamptz
+  checkOutAt      DateTime? @map("check_out_at") @db.Timestamptz
+  checkInLat      Decimal?  @map("check_in_lat") @db.Decimal(10, 7)
+  checkInLng      Decimal?  @map("check_in_lng") @db.Decimal(10, 7)
+  withinGeofence  Boolean   @default(false) @map("within_geofence")
+
+  @@index([phlebotomistId, checkInAt(sort: Desc)])
+  @@map("field_attendance")
+  @@schema("field")
+}
+
+model GeoFence {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  name           String   @db.VarChar(128)
+  centerLat      Decimal  @map("center_lat") @db.Decimal(10, 7)
+  centerLng      Decimal  @map("center_lng") @db.Decimal(10, 7)
+  radiusMeters   Int      @map("radius_meters")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, branchId])
+  @@map("geo_fences")
+  @@schema("field")
+}
+
+// ─── RADIOLOGY SCHEMA ──────────────────────────────────────────────────────────
+
+enum ModalityType {
+  XR
+  CT
+  MR
+  US
+  MG
+
+  @@schema("radiology")
+}
+
+enum StudyStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  REPORTED
+  CANCELLED
+
+  @@schema("radiology")
+}
+
+model PacsNode {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  name           String   @db.VarChar(128)
+  aeTitle        String   @map("ae_title") @db.VarChar(16)
+  host           String   @db.VarChar(255)
+  port           Int      @default(104)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, aeTitle])
+  @@map("pacs_nodes")
+  @@schema("radiology")
+}
+
+model RadiologyStudy {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  branchId       String       @map("branch_id") @db.Uuid
+  patientId      String       @map("patient_id") @db.Uuid
+  studyUid       String       @map("study_uid") @db.VarChar(128)
+  accessionNumber String      @map("accession_number") @db.VarChar(32)
+  modality       ModalityType
+  bodyPart       String?      @map("body_part") @db.VarChar(64)
+  description    String?      @db.VarChar(255)
+  status         StudyStatus  @default(SCHEDULED)
+  scheduledAt    DateTime?    @map("scheduled_at") @db.Timestamptz
+  performedAt    DateTime?    @map("performed_at") @db.Timestamptz
+  referringDoctor String?     @map("referring_doctor") @db.VarChar(255)
+  pacsNodeId     String?      @map("pacs_node_id") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  series  DicomSeries[]
+  report  RadiologyReport?
+
+  @@unique([tenantId, studyUid])
+  @@unique([tenantId, accessionNumber])
+  @@index([patientId])
+  @@map("radiology_studies")
+  @@schema("radiology")
+}
+
+model DicomSeries {
+  id        String   @id @default(uuid()) @db.Uuid
+  studyId   String   @map("study_id") @db.Uuid
+  seriesUid String   @map("series_uid") @db.VarChar(128)
+  modality  ModalityType
+  seriesNumber Int?  @map("series_number")
+  description String? @db.VarChar(255)
+  instanceCount Int   @default(0) @map("instance_count")
+
+  study     RadiologyStudy @relation(fields: [studyId], references: [id], onDelete: Cascade)
+  instances DicomInstance[]
+
+  @@unique([studyId, seriesUid])
+  @@map("dicom_series")
+  @@schema("radiology")
+}
+
+model DicomInstance {
+  id           String   @id @default(uuid()) @db.Uuid
+  seriesId     String   @map("series_id") @db.Uuid
+  sopInstanceUid String @map("sop_instance_uid") @db.VarChar(128)
+  instanceNumber Int?   @map("instance_number")
+  storagePath  String?  @map("storage_path")
+  fileSize     BigInt?  @map("file_size")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  series DicomSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@unique([seriesId, sopInstanceUid])
+  @@map("dicom_instances")
+  @@schema("radiology")
+}
+
+model RadiologyReport {
+  id             String    @id @default(uuid()) @db.Uuid
+  studyId        String    @unique @map("study_id") @db.Uuid
+  reportNumber   String    @map("report_number") @db.VarChar(32)
+  findings       String?
+  impression     String?
+  reportedBy     String?   @map("reported_by") @db.Uuid
+  verifiedBy     String?   @map("verified_by") @db.Uuid
+  reportedAt     DateTime? @map("reported_at") @db.Timestamptz
+  verifiedAt     DateTime? @map("verified_at") @db.Timestamptz
+  pdfS3Key       String?   @map("pdf_s3_key")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  study RadiologyStudy @relation(fields: [studyId], references: [id])
+
+  @@map("radiology_reports")
+  @@schema("radiology")
+}
+
+// ─── HRMS SCHEMA ───────────────────────────────────────────────────────────────
+
+enum EmploymentStatus {
+  ACTIVE
+  ON_LEAVE
+  TERMINATED
+  PROBATION
+
+  @@schema("hrms")
+}
+
+enum PayrollStatus {
+  DRAFT
+  PROCESSED
+  PAID
+
+  @@schema("hrms")
+}
+
+model Employee {
+  id             String           @id @default(uuid()) @db.Uuid
+  tenantId       String           @map("tenant_id") @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  branchId       String           @map("branch_id") @db.Uuid
+  userId         String?          @map("user_id") @db.Uuid
+  employeeCode   String           @map("employee_code") @db.VarChar(32)
+  firstName      String           @map("first_name") @db.VarChar(128)
+  lastName       String?          @map("last_name") @db.VarChar(128)
+  email          String?          @db.VarChar(255)
+  phone          String?          @db.VarChar(20)
+  department     String?          @db.VarChar(64)
+  designation    String?          @db.VarChar(64)
+  joinDate       DateTime         @map("join_date") @db.Date
+  status         EmploymentStatus @default(ACTIVE)
+  salary         Decimal?         @db.Decimal(14, 2)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  payrollLines PayrollLine[]
+  shiftAssignments ShiftAssignment[]
+  certifications Certification[]
+
+  @@unique([tenantId, employeeCode])
+  @@index([tenantId, branchId])
+  @@map("employees")
+  @@schema("hrms")
+}
+
+model PayrollRun {
+  id             String        @id @default(uuid()) @db.Uuid
+  tenantId       String        @map("tenant_id") @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  runNumber      String        @map("run_number") @db.VarChar(32)
+  periodMonth    Int           @map("period_month")
+  periodYear     Int           @map("period_year")
+  status         PayrollStatus @default(DRAFT)
+  totalAmount    Decimal       @default(0) @map("total_amount") @db.Decimal(14, 2)
+  processedAt    DateTime?     @map("processed_at") @db.Timestamptz
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  lines PayrollLine[]
+
+  @@unique([tenantId, runNumber])
+  @@map("payroll_runs")
+  @@schema("hrms")
+}
+
+model PayrollLine {
+  id           String  @id @default(uuid()) @db.Uuid
+  payrollRunId String  @map("payroll_run_id") @db.Uuid
+  employeeId   String  @map("employee_id") @db.Uuid
+  basicSalary  Decimal @map("basic_salary") @db.Decimal(14, 2)
+  allowances   Decimal @default(0) @db.Decimal(14, 2)
+  deductions   Decimal @default(0) @db.Decimal(14, 2)
+  netPay       Decimal @map("net_pay") @db.Decimal(14, 2)
+
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee   Employee   @relation(fields: [employeeId], references: [id])
+
+  @@index([payrollRunId])
+  @@map("payroll_lines")
+  @@schema("hrms")
+}
+
+model HrmsAttendance {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  employeeId String    @map("employee_id") @db.Uuid
+  date       DateTime  @db.Date
+  checkIn    DateTime? @map("check_in") @db.Timestamptz
+  checkOut   DateTime? @map("check_out") @db.Timestamptz
+  status     String    @default("present") @db.VarChar(16)
+  notes      String?
+
+  @@unique([employeeId, date])
+  @@index([tenantId, date])
+  @@map("hrms_attendance")
+  @@schema("hrms")
+}
+
+model Shift {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(64)
+  startTime      String   @map("start_time") @db.VarChar(8)
+  endTime        String   @map("end_time") @db.VarChar(8)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  assignments ShiftAssignment[]
+
+  @@index([tenantId])
+  @@map("shifts")
+  @@schema("hrms")
+}
+
+model ShiftAssignment {
+  id         String   @id @default(uuid()) @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  shiftId    String   @map("shift_id") @db.Uuid
+  date       DateTime @db.Date
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  shift    Shift    @relation(fields: [shiftId], references: [id])
+
+  @@unique([employeeId, date])
+  @@map("shift_assignments")
+  @@schema("hrms")
+}
+
+model TrainingRecord {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  employeeId     String    @map("employee_id") @db.Uuid
+  trainingName   String    @map("training_name") @db.VarChar(255)
+  provider       String?   @db.VarChar(128)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz
+  expiryAt       DateTime? @map("expiry_at") @db.Date
+  certificateUrl String?   @map("certificate_url")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([employeeId])
+  @@map("training_records")
+  @@schema("hrms")
+}
+
+model Certification {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  employeeId     String    @map("employee_id") @db.Uuid
+  certName       String    @map("cert_name") @db.VarChar(255)
+  issuingBody    String?   @map("issuing_body") @db.VarChar(128)
+  certNumber     String?   @map("cert_number") @db.VarChar(64)
+  issuedAt       DateTime? @map("issued_at") @db.Date
+  expiresAt      DateTime? @map("expires_at") @db.Date
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+  @@map("certifications")
+  @@schema("hrms")
+}
+
+// ─── MARKETPLACE SCHEMA ────────────────────────────────────────────────────────
+
+enum PartnerOrderStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+
+  @@schema("marketplace")
+}
+
+model PartnerLab {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  city           String?  @db.VarChar(64)
+  nablAccredited Boolean  @default(false) @map("nabl_accredited")
+  rating         Decimal? @db.Decimal(3, 2)
+  contactEmail   String?  @map("contact_email") @db.VarChar(255)
+  contactPhone   String?  @map("contact_phone") @db.VarChar(20)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  listings MarketplaceListing[]
+  orders   PartnerOrder[]
+
+  @@unique([tenantId, code])
+  @@map("partner_labs")
+  @@schema("marketplace")
+}
+
+model MarketplaceListing {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  partnerLabId   String?  @map("partner_lab_id") @db.Uuid
+  listingType    String   @map("listing_type") @db.VarChar(32)
+  itemCode       String   @map("item_code") @db.VarChar(64)
+  name           String   @db.VarChar(255)
+  description    String?
+  price          Decimal  @db.Decimal(14, 2)
+  mrp            Decimal? @db.Decimal(14, 2)
+  isActive       Boolean  @default(true) @map("is_active")
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  partnerLab PartnerLab? @relation(fields: [partnerLabId], references: [id])
+
+  @@unique([tenantId, itemCode])
+  @@index([tenantId, listingType])
+  @@map("marketplace_listings")
+  @@schema("marketplace")
+}
+
+model PartnerOrder {
+  id             String             @id @default(uuid()) @db.Uuid
+  tenantId       String             @map("tenant_id") @db.Uuid
+  partnerLabId   String             @map("partner_lab_id") @db.Uuid
+  patientId      String?            @map("patient_id") @db.Uuid
+  orderNumber    String             @map("order_number") @db.VarChar(32)
+  orderType      String             @map("order_type") @db.VarChar(32)
+  status         PartnerOrderStatus @default(PENDING)
+  totalAmount    Decimal            @map("total_amount") @db.Decimal(14, 2)
+  corporateId    String?            @map("corporate_id") @db.Uuid
+  metadata       Json               @default("{}")
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz
+
+  partnerLab PartnerLab @relation(fields: [partnerLabId], references: [id])
+
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId, status])
+  @@map("partner_orders")
+  @@schema("marketplace")
+}
+
+model WellnessPackage {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  description    String?
+  testIds        Json     @default("[]") @map("test_ids")
+  price          Decimal  @db.Decimal(14, 2)
+  corporatePrice Decimal? @map("corporate_price") @db.Decimal(14, 2)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, code])
+  @@map("wellness_packages")
+  @@schema("marketplace")
+}
+
+model CampBooking {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  campId         String   @map("camp_id") @db.Uuid
+  patientId      String?  @map("patient_id") @db.Uuid
+  bookingNumber  String   @map("booking_number") @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  phone          String?  @db.VarChar(20)
+  packageId      String?  @map("package_id") @db.Uuid
+  status         String   @default("confirmed") @db.VarChar(16)
+  bookedAt       DateTime @default(now()) @map("booked_at") @db.Timestamptz
+
+  @@unique([tenantId, bookingNumber])
+  @@index([campId])
+  @@map("camp_bookings")
+  @@schema("marketplace")
+}
+
+// ─── OBSERVABILITY SCHEMA ──────────────────────────────────────────────────────
+
+enum SlaStatus {
+  HEALTHY
+  AT_RISK
+  BREACHED
+
+  @@schema("observability")
+}
+
+model ServiceHealthSnapshot {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String?  @map("tenant_id") @db.Uuid
+  serviceName    String   @map("service_name") @db.VarChar(64)
+  status         String   @db.VarChar(16)
+  latencyP50Ms   Int?     @map("latency_p50_ms")
+  latencyP99Ms   Int?     @map("latency_p99_ms")
+  errorRate      Decimal? @map("error_rate") @db.Decimal(5, 4)
+  requestCount   BigInt?  @map("request_count")
+  recordedAt     DateTime @default(now()) @map("recorded_at") @db.Timestamptz
+
+  @@index([serviceName, recordedAt(sort: Desc)])
+  @@map("service_health_snapshots")
+  @@schema("observability")
+}
+
+model SlaDefinition {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  name           String   @db.VarChar(128)
+  serviceName    String   @map("service_name") @db.VarChar(64)
+  targetUptime   Decimal  @map("target_uptime") @db.Decimal(5, 4)
+  targetLatencyMs Int     @map("target_latency_ms")
+  errorBudgetPct Decimal  @map("error_budget_pct") @db.Decimal(5, 2)
+  windowDays     Int      @default(30) @map("window_days")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  budgets ErrorBudget[]
+
+  @@index([tenantId, serviceName])
+  @@map("sla_definitions")
+  @@schema("observability")
+}
+
+model ErrorBudget {
+  id             String    @id @default(uuid()) @db.Uuid
+  slaId          String    @map("sla_id") @db.Uuid
+  periodStart    DateTime  @map("period_start") @db.Date
+  periodEnd      DateTime  @map("period_end") @db.Date
+  budgetTotal    Decimal   @map("budget_total") @db.Decimal(8, 4)
+  budgetConsumed Decimal   @default(0) @map("budget_consumed") @db.Decimal(8, 4)
+  status         SlaStatus @default(HEALTHY)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  sla SlaDefinition @relation(fields: [slaId], references: [id])
+
+  @@index([slaId, periodStart])
+  @@map("error_budgets")
+  @@schema("observability")
+}
+
+model TraceSpan {
+  id             String   @id @default(uuid()) @db.Uuid
+  traceId        String   @map("trace_id") @db.VarChar(64)
+  spanId         String   @map("span_id") @db.VarChar(32)
+  parentSpanId   String?  @map("parent_span_id") @db.VarChar(32)
+  serviceName    String   @map("service_name") @db.VarChar(64)
+  operationName  String   @map("operation_name") @db.VarChar(128)
+  durationMs     Int      @map("duration_ms")
+  status         String   @default("ok") @db.VarChar(16)
+  attributes     Json     @default("{}")
+  startedAt      DateTime @map("started_at") @db.Timestamptz
+
+  @@index([traceId])
+  @@index([serviceName, startedAt(sort: Desc)])
+  @@map("trace_spans")
+  @@schema("observability")
+}
+
+model CapacityMetric {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String?  @map("tenant_id") @db.Uuid
+  resourceType   String   @map("resource_type") @db.VarChar(32)
+  resourceName   String   @map("resource_name") @db.VarChar(64)
+  usagePct       Decimal  @map("usage_pct") @db.Decimal(5, 2)
+  forecastPct    Decimal? @map("forecast_pct") @db.Decimal(5, 2)
+  recordedAt     DateTime @default(now()) @map("recorded_at") @db.Timestamptz
+
+  @@index([resourceType, recordedAt(sort: Desc)])
+  @@map("capacity_metrics")
+  @@schema("observability")
+}
+
+// ─── DATA PLATFORM SCHEMA ──────────────────────────────────────────────────────
+
+enum PipelineStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+
+  @@schema("data")
+}
+
+model DataPipeline {
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  pipelineName   String         @map("pipeline_name") @db.VarChar(128)
+  sourceTopic    String         @map("source_topic") @db.VarChar(128)
+  lakePath       String         @map("lake_path") @db.VarChar(512)
+  warehouseTable String?        @map("warehouse_table") @db.VarChar(128)
+  status         PipelineStatus @default(PENDING)
+  lastRunAt      DateTime?      @map("last_run_at") @db.Timestamptz
+  recordsProcessed BigInt?      @map("records_processed")
+  config         Json           @default("{}")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  runs PipelineRun[]
+
+  @@unique([tenantId, pipelineName])
+  @@map("data_pipelines")
+  @@schema("data")
+}
+
+model PipelineRun {
+  id             String         @id @default(uuid()) @db.Uuid
+  pipelineId     String         @map("pipeline_id") @db.Uuid
+  runNumber      String         @map("run_number") @db.VarChar(32)
+  status         PipelineStatus @default(PENDING)
+  startedAt      DateTime       @default(now()) @map("started_at") @db.Timestamptz
+  completedAt    DateTime?      @map("completed_at") @db.Timestamptz
+  recordsIn      BigInt?        @map("records_in")
+  recordsOut     BigInt?        @map("records_out")
+  errorMessage   String?        @map("error_message")
+
+  pipeline DataPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@index([pipelineId, startedAt(sort: Desc)])
+  @@map("pipeline_runs")
+  @@schema("data")
+}
+
+model DataLakeObject {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  bucket         String   @db.VarChar(128)
+  objectKey      String   @map("object_key") @db.VarChar(512)
+  sourceEvent    String?  @map("source_event") @db.VarChar(64)
+  format         String   @default("parquet") @db.VarChar(16)
+  sizeBytes      BigInt?  @map("size_bytes")
+  partitionDate  DateTime? @map("partition_date") @db.Date
+  ingestedAt     DateTime @default(now()) @map("ingested_at") @db.Timestamptz
+
+  @@index([tenantId, partitionDate])
+  @@map("data_lake_objects")
+  @@schema("data")
+}
+
+model WarehouseTable {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  tableName      String   @map("table_name") @db.VarChar(128)
+  schemaName     String   @default("warehouse") @map("schema_name") @db.VarChar(64)
+  rowCount       BigInt?  @map("row_count")
+  lastRefreshedAt DateTime? @map("last_refreshed_at") @db.Timestamptz
+  sparkJobId     String?  @map("spark_job_id") @db.VarChar(64)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, schemaName, tableName])
+  @@map("warehouse_tables")
+  @@schema("data")
+}
+
+// ─── WORKFLOW SCHEMA ───────────────────────────────────────────────────────────
+
+enum WorkflowInstanceStatus {
+  RUNNING
+  WAITING
+  COMPLETED
+  FAILED
+  CANCELLED
+
+  @@schema("workflow")
+}
+
+enum WorkflowTaskStatus {
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  ESCALATED
+  SKIPPED
+
+  @@schema("workflow")
+}
+
+model WorkflowDefinition {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(64)
+  name           String   @db.VarChar(255)
+  category       String?  @db.VarChar(64)
+  bpmnXml        String?  @map("bpmn_xml")
+  version        Int      @default(1)
+  isActive       Boolean  @default(true) @map("is_active")
+  slaMinutes     Int?     @map("sla_minutes")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  instances WorkflowInstance[]
+
+  @@unique([tenantId, code, version])
+  @@map("workflow_definitions")
+  @@schema("workflow")
+}
+
+model WorkflowInstance {
+  id             String                 @id @default(uuid()) @db.Uuid
+  tenantId       String                 @map("tenant_id") @db.Uuid
+  definitionId   String                 @map("definition_id") @db.Uuid
+  instanceNumber String                 @map("instance_number") @db.VarChar(32)
+  status         WorkflowInstanceStatus @default(RUNNING)
+  referenceType  String?                @map("reference_type") @db.VarChar(32)
+  referenceId    String?                @map("reference_id") @db.Uuid
+  currentStep    String?                @map("current_step") @db.VarChar(64)
+  startedAt      DateTime               @default(now()) @map("started_at") @db.Timestamptz
+  completedAt    DateTime?              @map("completed_at") @db.Timestamptz
+  dueAt          DateTime?              @map("due_at") @db.Timestamptz
+  context        Json                   @default("{}")
+
+  definition WorkflowDefinition @relation(fields: [definitionId], references: [id])
+  tasks      WorkflowTask[]
+
+  @@unique([tenantId, instanceNumber])
+  @@index([tenantId, status])
+  @@map("workflow_instances")
+  @@schema("workflow")
+}
+
+model WorkflowTask {
+  id             String             @id @default(uuid()) @db.Uuid
+  instanceId     String             @map("instance_id") @db.Uuid
+  taskKey        String             @map("task_key") @db.VarChar(64)
+  name           String             @db.VarChar(255)
+  taskType       String             @map("task_type") @db.VarChar(32)
+  status         WorkflowTaskStatus @default(PENDING)
+  assignedTo     String?            @map("assigned_to") @db.Uuid
+  assignedRole   String?            @map("assigned_role") @db.VarChar(64)
+  dueAt          DateTime?          @map("due_at") @db.Timestamptz
+  completedAt    DateTime?          @map("completed_at") @db.Timestamptz
+  escalatedAt    DateTime?          @map("escalated_at") @db.Timestamptz
+  outcome        String?            @db.VarChar(64)
+  notes          String?
+
+  instance WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId])
+  @@index([assignedTo, status])
+  @@map("workflow_tasks")
+  @@schema("workflow")
+}
+
+model AutomationRule {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  name           String   @db.VarChar(128)
+  triggerEvent   String   @map("trigger_event") @db.VarChar(64)
+  conditions     Json     @default("{}")
+  workflowCode   String   @map("workflow_code") @db.VarChar(64)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, triggerEvent])
+  @@map("automation_rules")
+  @@schema("workflow")
+}
+
+// ─── DMS SCHEMA ────────────────────────────────────────────────────────────────
+
+enum DocumentStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+  LEGAL_HOLD
+  DELETED
+
+  @@schema("dms")
+}
+
+model Document {
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  documentNumber String         @map("document_number") @db.VarChar(32)
+  title          String         @db.VarChar(255)
+  category       String?        @db.VarChar(64)
+  status         DocumentStatus @default(ACTIVE)
+  currentVersion Int            @default(1) @map("current_version")
+  storageKey     String?        @map("storage_key")
+  mimeType       String?        @map("mime_type") @db.VarChar(64)
+  fileSize       BigInt?        @map("file_size")
+  retentionUntil DateTime?      @map("retention_until") @db.Date
+  legalHold      Boolean        @default(false) @map("legal_hold")
+  ocrText        String?        @map("ocr_text")
+  metadata       Json           @default("{}")
+  createdBy      String?        @map("created_by") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  versions  DocumentVersion[]
+  signatures DocumentSignature[]
+
+  @@unique([tenantId, documentNumber])
+  @@index([tenantId, status])
+  @@map("documents")
+  @@schema("dms")
+}
+
+model DocumentVersion {
+  id           String   @id @default(uuid()) @db.Uuid
+  documentId   String   @map("document_id") @db.Uuid
+  version      Int
+  storageKey   String   @map("storage_key")
+  fileSize     BigInt?  @map("file_size")
+  changeNotes  String?  @map("change_notes")
+  uploadedBy   String?  @map("uploaded_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version])
+  @@map("document_versions")
+  @@schema("dms")
+}
+
+model DocumentSignature {
+  id           String   @id @default(uuid()) @db.Uuid
+  documentId   String   @map("document_id") @db.Uuid
+  signedBy     String   @map("signed_by") @db.Uuid
+  signedByName String   @map("signed_by_name") @db.VarChar(255)
+  signatureType String  @map("signature_type") @db.VarChar(32)
+  signedAt     DateTime @default(now()) @map("signed_at") @db.Timestamptz
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+
+  document Document @relation(fields: [documentId], references: [id])
+
+  @@index([documentId])
+  @@map("document_signatures")
+  @@schema("dms")
+}
+
+// ─── BRANDING (WHITE LABEL) SCHEMA ─────────────────────────────────────────────
+
+model TenantBrand {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @unique @map("tenant_id") @db.Uuid
+  brandName      String   @map("brand_name") @db.VarChar(255)
+  logoUrl        String?  @map("logo_url")
+  faviconUrl     String?  @map("favicon_url")
+  primaryColor   String?  @map("primary_color") @db.VarChar(16)
+  secondaryColor String?  @map("secondary_color") @db.VarChar(16)
+  customDomain   String?  @map("custom_domain") @db.VarChar(255)
+  themeConfig    Json     @default("{}") @map("theme_config")
+  mobileAppConfig Json    @default("{}") @map("mobile_app_config")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  featureToggles FeatureToggle[]
+
+  @@map("tenant_brands")
+  @@schema("branding")
+}
+
+model FeatureToggle {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  featureKey     String   @map("feature_key") @db.VarChar(64)
+  enabled        Boolean  @default(true)
+  config         Json     @default("{}")
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  brand TenantBrand @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@unique([tenantId, featureKey])
+  @@map("feature_toggles")
+  @@schema("branding")
+}
+
+model FranchiseBrand {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  branchId       String   @map("branch_id") @db.Uuid
+  brandName      String   @map("brand_name") @db.VarChar(255)
+  logoUrl        String?  @map("logo_url")
+  themeConfig    Json     @default("{}") @map("theme_config")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, branchId])
+  @@map("franchise_brands")
+  @@schema("branding")
+}
+
+// ─── AI AGENTS SCHEMA ──────────────────────────────────────────────────────────
+
+enum AgentType {
+  PATIENT
+  DOCTOR
+  LAB
+  MANAGEMENT
+
+  @@schema("agents")
+}
+
+model AiAgent {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  agentType      AgentType @map("agent_type")
+  name           String    @db.VarChar(128)
+  description    String?
+  systemPrompt   String?   @map("system_prompt")
+  capabilities   Json      @default("[]")
+  modelKey       String?   @map("model_key") @db.VarChar(64)
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  sessions AgentSession[]
+
+  @@unique([tenantId, agentType, name])
+  @@map("ai_agents")
+  @@schema("agents")
+}
+
+model AgentSession {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  agentId        String   @map("agent_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  patientId      String?  @map("patient_id") @db.Uuid
+  context        Json     @default("{}")
+  status         String   @default("active") @db.VarChar(16)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  agent    AiAgent         @relation(fields: [agentId], references: [id])
+  messages AgentMessage[]
+
+  @@index([tenantId, agentId])
+  @@map("agent_sessions")
+  @@schema("agents")
+}
+
+model AgentMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  sessionId String   @map("session_id") @db.Uuid
+  role      String   @db.VarChar(16)
+  content   String
+  toolCalls Json?    @map("tool_calls")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  session AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("agent_messages")
+  @@schema("agents")
+}
+
+// ─── I18N SCHEMA ───────────────────────────────────────────────────────────────
+
+model CountryPack {
+  id             String   @id @default(uuid()) @db.Uuid
+  countryCode    String   @unique @map("country_code") @db.VarChar(3)
+  name           String   @db.VarChar(128)
+  currency       String   @db.VarChar(3)
+  locale         String   @db.VarChar(16)
+  taxRules       Json     @default("{}") @map("tax_rules")
+  compliancePack Json     @default("{}") @map("compliance_pack")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("country_packs")
+  @@schema("i18n")
+}
+
+model TranslationKey {
+  id             String   @id @default(uuid()) @db.Uuid
+  namespace      String   @db.VarChar(64)
+  key            String   @db.VarChar(128)
+  defaultValue   String   @map("default_value")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  translations Translation[]
+
+  @@unique([namespace, key])
+  @@map("translation_keys")
+  @@schema("i18n")
+}
+
+model Translation {
+  id             String   @id @default(uuid()) @db.Uuid
+  keyId          String   @map("key_id") @db.Uuid
+  locale         String   @db.VarChar(16)
+  value          String
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  translationKey TranslationKey @relation(fields: [keyId], references: [id], onDelete: Cascade)
+
+  @@unique([keyId, locale])
+  @@map("translations")
+  @@schema("i18n")
+}
+
+model TenantLocale {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  countryCode    String   @map("country_code") @db.VarChar(3)
+  currency       String   @db.VarChar(3)
+  locale         String   @db.VarChar(16)
+  timezone       String   @default("Asia/Kolkata") @db.VarChar(64)
+  dateFormat     String   @default("DD/MM/YYYY") @map("date_format") @db.VarChar(16)
+  isPrimary      Boolean  @default(false) @map("is_primary")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, countryCode])
+  @@index([tenantId])
+  @@map("tenant_locales")
+  @@schema("i18n")
+}
+
+// ─── SECURITY SCHEMA ───────────────────────────────────────────────────────────
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@schema("security")
+}
+
+enum IncidentStatus {
+  OPEN
+  INVESTIGATING
+  CONTAINED
+  RESOLVED
+  CLOSED
+
+  @@schema("security")
+}
+
+enum ThreatLevel {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@schema("security")
+}
+
+model SecurityIncident {
+  id             String           @id @default(uuid()) @db.Uuid
+  tenantId       String?          @map("tenant_id") @db.Uuid
+  incidentNumber String           @map("incident_number") @db.VarChar(32)
+  title          String           @db.VarChar(255)
+  description    String?
+  severity       IncidentSeverity @default(MEDIUM)
+  status         IncidentStatus   @default(OPEN)
+  threatType     String?          @map("threat_type") @db.VarChar(64)
+  sourceIp       String?          @map("source_ip") @db.VarChar(45)
+  affectedService String?         @map("affected_service") @db.VarChar(64)
+  assignedTo     String?          @map("assigned_to") @db.Uuid
+  detectedAt     DateTime         @default(now()) @map("detected_at") @db.Timestamptz
+  resolvedAt     DateTime?        @map("resolved_at") @db.Timestamptz
+  metadata       Json             @default("{}")
+
+  @@unique([incidentNumber])
+  @@index([tenantId, status])
+  @@map("security_incidents")
+  @@schema("security")
+}
+
+model ThreatDetection {
+  id             String      @id @default(uuid()) @db.Uuid
+  tenantId       String?     @map("tenant_id") @db.Uuid
+  ruleName       String      @map("rule_name") @db.VarChar(128)
+  threatLevel    ThreatLevel @map("threat_level")
+  source         String      @db.VarChar(64)
+  description    String
+  rawEvent       Json?       @map("raw_event")
+  isAcknowledged Boolean     @default(false) @map("is_acknowledged")
+  detectedAt     DateTime    @default(now()) @map("detected_at") @db.Timestamptz
+
+  @@index([tenantId, detectedAt(sort: Desc)])
+  @@map("threat_detections")
+  @@schema("security")
+}
+
+model VulnerabilityScan {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String?  @map("tenant_id") @db.Uuid
+  scanNumber     String   @map("scan_number") @db.VarChar(32)
+  scanType       String   @map("scan_type") @db.VarChar(32)
+  target         String   @db.VarChar(255)
+  findingsCount  Int      @default(0) @map("findings_count")
+  criticalCount  Int      @default(0) @map("critical_count")
+  highCount      Int      @default(0) @map("high_count")
+  status         String   @default("completed") @db.VarChar(16)
+  scannedAt      DateTime @default(now()) @map("scanned_at") @db.Timestamptz
+  reportUrl      String?  @map("report_url")
+
+  findings VulnerabilityFinding[]
+
+  @@unique([scanNumber])
+  @@map("vulnerability_scans")
+  @@schema("security")
+}
+
+model VulnerabilityFinding {
+  id          String  @id @default(uuid()) @db.Uuid
+  scanId      String  @map("scan_id") @db.Uuid
+  cveId       String? @map("cve_id") @db.VarChar(32)
+  severity    String  @db.VarChar(16)
+  title       String  @db.VarChar(255)
+  description String?
+  remediation String?
+  status      String  @default("open") @db.VarChar(16)
+
+  scan VulnerabilityScan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId])
+  @@map("vulnerability_findings")
+  @@schema("security")
+}
+
+model PentestEngagement {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String?   @map("tenant_id") @db.Uuid
+  engagementNumber String  @map("engagement_number") @db.VarChar(32)
+  vendor         String    @db.VarChar(128)
+  scope          String
+  status         String    @default("planned") @db.VarChar(16)
+  scheduledAt    DateTime? @map("scheduled_at") @db.Date
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz
+  findingsCount  Int       @default(0) @map("findings_count")
+  reportUrl      String?   @map("report_url")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([engagementNumber])
+  @@map("pentest_engagements")
+  @@schema("security")
+}
+
+model CertificateRecord {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String?   @map("tenant_id") @db.Uuid
+  domain         String    @db.VarChar(255)
+  issuer         String?   @db.VarChar(128)
+  serialNumber   String?   @map("serial_number") @db.VarChar(128)
+  validFrom      DateTime  @map("valid_from") @db.Timestamptz
+  validTo        DateTime  @map("valid_to") @db.Timestamptz
+  autoRenew      Boolean   @default(true) @map("auto_renew")
+  status         String    @default("active") @db.VarChar(16)
+  lastCheckedAt  DateTime? @map("last_checked_at") @db.Timestamptz
+
+  @@index([validTo])
+  @@map("certificate_records")
+  @@schema("security")
+}
+
+model SecretRotationLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String?  @map("tenant_id") @db.Uuid
+  secretName     String   @map("secret_name") @db.VarChar(128)
+  rotationType   String   @map("rotation_type") @db.VarChar(32)
+  status         String   @default("success") @db.VarChar(16)
+  rotatedAt      DateTime @default(now()) @map("rotated_at") @db.Timestamptz
+  nextRotationAt DateTime? @map("next_rotation_at") @db.Timestamptz
+
+  @@index([secretName, rotatedAt(sort: Desc)])
+  @@map("secret_rotation_logs")
+  @@schema("security")
+}
+
+model SiemEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String?  @map("tenant_id") @db.Uuid
+  eventType      String   @map("event_type") @db.VarChar(64)
+  source         String   @db.VarChar(64)
+  severity       String   @db.VarChar(16)
+  message        String
+  rawPayload     Json?    @map("raw_payload")
+  ingestedAt     DateTime @default(now()) @map("ingested_at") @db.Timestamptz
+
+  @@index([tenantId, ingestedAt(sort: Desc)])
+  @@map("siem_events")
+  @@schema("security")
+}
+
+// ─── COMPLIANCE SCHEMA ─────────────────────────────────────────────────────────
+
+enum ComplianceFramework {
+  HIPAA
+  GDPR
+  DPDP
+  ISO_27001
+  SOC2
+  NABL
+  CAP
+  ABDM
+
+  @@schema("compliance")
+}
+
+enum ControlStatus {
+  COMPLIANT
+  PARTIAL
+  NON_COMPLIANT
+  NOT_APPLICABLE
+
+  @@schema("compliance")
+}
+
+model CompliancePack {
+  id             String              @id @default(uuid()) @db.Uuid
+  framework      ComplianceFramework @unique
+  name           String              @db.VarChar(128)
+  version        String              @default("1.0") @db.VarChar(16)
+  description    String?
+  controlCount   Int                 @default(0) @map("control_count")
+  isActive       Boolean             @default(true) @map("is_active")
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz
+
+  controls ComplianceControl[]
+
+  @@map("compliance_packs")
+  @@schema("compliance")
+}
+
+model ComplianceControl {
+  id             String        @id @default(uuid()) @db.Uuid
+  packId         String        @map("pack_id") @db.Uuid
+  controlCode    String        @map("control_code") @db.VarChar(32)
+  title          String        @db.VarChar(255)
+  description    String?
+  category       String?       @db.VarChar(64)
+  status         ControlStatus @default(PARTIAL)
+  evidenceCount  Int           @default(0) @map("evidence_count")
+  lastAssessedAt DateTime?     @map("last_assessed_at") @db.Timestamptz
+
+  pack     CompliancePack    @relation(fields: [packId], references: [id])
+  evidence AuditEvidence[]
+
+  @@unique([packId, controlCode])
+  @@map("compliance_controls")
+  @@schema("compliance")
+}
+
+model AuditEvidence {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  controlId      String   @map("control_id") @db.Uuid
+  evidenceType   String   @map("evidence_type") @db.VarChar(32)
+  title          String   @db.VarChar(255)
+  description    String?
+  storageKey     String?  @map("storage_key")
+  collectedAt    DateTime @default(now()) @map("collected_at") @db.Timestamptz
+  collectedBy    String?  @map("collected_by") @db.Uuid
+
+  control ComplianceControl @relation(fields: [controlId], references: [id])
+
+  @@index([tenantId, controlId])
+  @@map("audit_evidence")
+  @@schema("compliance")
+}
+
+model RiskRegisterEntry {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  riskNumber     String   @map("risk_number") @db.VarChar(32)
+  title          String   @db.VarChar(255)
+  category       String   @db.VarChar(64)
+  likelihood     String   @db.VarChar(16)
+  impact         String   @db.VarChar(16)
+  riskScore      Int      @map("risk_score")
+  mitigation     String?
+  owner          String?  @db.Uuid
+  status         String   @default("open") @db.VarChar(16)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, riskNumber])
+  @@index([tenantId, riskScore(sort: Desc)])
+  @@map("risk_register")
+  @@schema("compliance")
+}
+
+model PolicyDocument {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  policyCode     String   @map("policy_code") @db.VarChar(32)
+  title          String   @db.VarChar(255)
+  category       String   @db.VarChar(64)
+  version        Int      @default(1)
+  content        String?
+  effectiveFrom  DateTime @map("effective_from") @db.Date
+  reviewDueAt    DateTime? @map("review_due_at") @db.Date
+  status         String   @default("active") @db.VarChar(16)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, policyCode, version])
+  @@map("policy_documents")
+  @@schema("compliance")
+}
+
+// ─── CUSTOMER SUCCESS SCHEMA ───────────────────────────────────────────────────
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  DATA_MIGRATION
+  TRAINING
+  GO_LIVE
+  COMPLETED
+
+  @@schema("customer_success")
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING
+  RESOLVED
+  CLOSED
+
+  @@schema("customer_success")
+}
+
+model TenantOnboarding {
+  id             String           @id @default(uuid()) @db.Uuid
+  tenantId       String           @unique @map("tenant_id") @db.Uuid
+  status         OnboardingStatus @default(NOT_STARTED)
+  currentStep    String?          @map("current_step") @db.VarChar(64)
+  progressPct    Int              @default(0) @map("progress_pct")
+  assignedCsm    String?          @map("assigned_csm") @db.Uuid
+  targetGoLive   DateTime?        @map("target_go_live") @db.Date
+  completedAt    DateTime?        @map("completed_at") @db.Timestamptz
+  checklist      Json             @default("[]")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("tenant_onboarding")
+  @@schema("customer_success")
+}
+
+model DataImportJob {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  jobNumber      String   @map("job_number") @db.VarChar(32)
+  importType     String   @map("import_type") @db.VarChar(32)
+  status         String   @default("pending") @db.VarChar(16)
+  totalRecords   Int      @default(0) @map("total_records")
+  processedRecords Int    @default(0) @map("processed_records")
+  errorCount     Int      @default(0) @map("error_count")
+  startedAt      DateTime? @map("started_at") @db.Timestamptz
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, jobNumber])
+  @@map("data_import_jobs")
+  @@schema("customer_success")
+}
+
+model KnowledgeArticle {
+  id             String   @id @default(uuid()) @db.Uuid
+  slug           String   @unique @db.VarChar(128)
+  title          String   @db.VarChar(255)
+  category       String   @db.VarChar(64)
+  content        String
+  isPublished    Boolean  @default(true) @map("is_published")
+  viewCount      Int      @default(0) @map("view_count")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([category])
+  @@map("knowledge_articles")
+  @@schema("customer_success")
+}
+
+model SupportTicket {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  ticketNumber   String       @map("ticket_number") @db.VarChar(32)
+  subject        String       @db.VarChar(255)
+  description    String?
+  priority       String       @default("medium") @db.VarChar(16)
+  status         TicketStatus @default(OPEN)
+  category       String?      @db.VarChar(64)
+  assignedTo     String?      @map("assigned_to") @db.Uuid
+  createdBy      String?      @map("created_by") @db.Uuid
+  resolvedAt     DateTime?    @map("resolved_at") @db.Timestamptz
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, ticketNumber])
+  @@index([tenantId, status])
+  @@map("support_tickets")
+  @@schema("customer_success")
+}
+
+model TrainingCourse {
+  id             String   @id @default(uuid()) @db.Uuid
+  code           String   @unique @db.VarChar(32)
+  title          String   @db.VarChar(255)
+  description    String?
+  durationMins   Int      @default(30) @map("duration_mins")
+  moduleType     String   @map("module_type") @db.VarChar(32)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  enrollments TrainingEnrollment[]
+
+  @@map("training_courses")
+  @@schema("customer_success")
+}
+
+model TrainingEnrollment {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  courseId       String    @map("course_id") @db.Uuid
+  status         String    @default("enrolled") @db.VarChar(16)
+  progressPct    Int       @default(0) @map("progress_pct")
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz
+  enrolledAt     DateTime  @default(now()) @map("enrolled_at") @db.Timestamptz
+
+  course TrainingCourse @relation(fields: [courseId], references: [id])
+
+  @@unique([tenantId, userId, courseId])
+  @@map("training_enrollments")
+  @@schema("customer_success")
+}
+
+// ─── COMMERCIAL SCHEMA ─────────────────────────────────────────────────────────
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+
+  @@schema("commercial")
+}
+
+model SubscriptionPlan {
+  id             String   @id @default(uuid()) @db.Uuid
+  code           String   @unique @db.VarChar(32)
+  name           String   @db.VarChar(128)
+  tier           String   @db.VarChar(32)
+  monthlyPrice   Decimal  @map("monthly_price") @db.Decimal(14, 2)
+  annualPrice    Decimal? @map("annual_price") @db.Decimal(14, 2)
+  maxBranches    Int?     @map("max_branches")
+  maxUsers       Int?     @map("max_users")
+  features       Json     @default("[]")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  subscriptions TenantSubscription[]
+
+  @@map("subscription_plans")
+  @@schema("commercial")
+}
+
+model TenantSubscription {
+  id             String             @id @default(uuid()) @db.Uuid
+  tenantId       String             @unique @map("tenant_id") @db.Uuid
+  planId         String             @map("plan_id") @db.Uuid
+  status         SubscriptionStatus @default(TRIAL)
+  licenseKey     String?            @map("license_key") @db.VarChar(64)
+  seats          Int                @default(5)
+  startedAt      DateTime           @default(now()) @map("started_at") @db.Timestamptz
+  expiresAt      DateTime?          @map("expires_at") @db.Timestamptz
+  mrr            Decimal            @default(0) @map("mrr") @db.Decimal(14, 2)
+
+  plan SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@map("tenant_subscriptions")
+  @@schema("commercial")
+}
+
+model Quotation {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String?  @map("tenant_id") @db.Uuid
+  quoteNumber    String   @map("quote_number") @db.VarChar(32)
+  prospectName   String   @map("prospect_name") @db.VarChar(255)
+  prospectEmail  String?  @map("prospect_email") @db.VarChar(255)
+  planCode       String?  @map("plan_code") @db.VarChar(32)
+  totalAmount    Decimal  @map("total_amount") @db.Decimal(14, 2)
+  validUntil     DateTime @map("valid_until") @db.Date
+  status         String   @default("draft") @db.VarChar(16)
+  lineItems      Json     @default("[]") @map("line_items")
+  createdBy      String?  @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([quoteNumber])
+  @@map("quotations")
+  @@schema("commercial")
+}
+
+model PartnerContract {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  contractNumber String   @map("contract_number") @db.VarChar(32)
+  partnerType    String   @map("partner_type") @db.VarChar(32)
+  partnerName    String   @map("partner_name") @db.VarChar(255)
+  startDate      DateTime @map("start_date") @db.Date
+  endDate        DateTime? @map("end_date") @db.Date
+  value          Decimal  @db.Decimal(14, 2)
+  status         String   @default("active") @db.VarChar(16)
+  terms          Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, contractNumber])
+  @@map("partner_contracts")
+  @@schema("commercial")
+}
+
+model PartnerAccount {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  accountCode    String   @map("account_code") @db.VarChar(32)
+  name           String   @db.VarChar(255)
+  partnerType    String   @map("partner_type") @db.VarChar(32)
+  contactEmail   String?  @map("contact_email") @db.VarChar(255)
+  contactPhone   String?  @map("contact_phone") @db.VarChar(20)
+  region         String?  @db.VarChar(64)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([tenantId, accountCode])
+  @@map("partner_accounts")
+  @@schema("commercial")
+}
