@@ -20,7 +20,7 @@ if (!name || !portStr || !apiPrefix || !contextKey) {
 const port = parseInt(portStr, 10);
 const serviceName = `${name}-service`;
 const pkgName = `@health/${serviceName}`;
-const serviceDir = path.join(root, 'services', serviceName);
+const serviceDir = path.join(root, 'backend', 'services', serviceName);
 const srcDir = path.join(serviceDir, 'src');
 
 const copyDirs = ['database', 'redis', 'common/filters', 'common/interceptors'];
@@ -36,7 +36,7 @@ function writeFile(rel, content) {
 }
 
 // Copy from billing-service
-const billingSrc = path.join(root, 'services', 'billing-service', 'src');
+const billingSrc = path.join(root, 'backend', 'services', 'billing-service', 'src');
 for (const dir of copyDirs) {
   const src = path.join(billingSrc, dir);
   const dest = path.join(srcDir, dir);
@@ -245,9 +245,9 @@ writeFile(
   ) + '\n',
 );
 
-writeFile('nest-cli.json', fs.readFileSync(path.join(root, 'services/billing-service/nest-cli.json'), 'utf8'));
-writeFile('tsconfig.json', fs.readFileSync(path.join(root, 'services/billing-service/tsconfig.json'), 'utf8'));
-writeFile('jest.config.js', fs.readFileSync(path.join(root, 'services/billing-service/jest.config.js'), 'utf8'));
+writeFile('nest-cli.json', fs.readFileSync(path.join(root, 'backend/services/billing-service/nest-cli.json'), 'utf8'));
+writeFile('tsconfig.json', fs.readFileSync(path.join(root, 'backend/services/billing-service/tsconfig.json'), 'utf8'));
+writeFile('jest.config.js', fs.readFileSync(path.join(root, 'backend/services/billing-service/jest.config.js'), 'utf8'));
 
 writeFile(
   'Dockerfile',
@@ -262,13 +262,13 @@ COPY packages/logger/package.json packages/logger/
 COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/validation/package.json packages/validation/
 COPY packages/events/package.json packages/events/
-COPY services/${serviceName}/package.json services/${serviceName}/
+COPY backend/services/${serviceName}/package.json backend/services/${serviceName}/
 RUN pnpm install --frozen-lockfile --filter ${pkgName}...
 
 FROM deps AS build
 COPY tsconfig.base.json ./
 COPY packages ./packages
-COPY services/${serviceName} ./services/${serviceName}
+COPY backend/services/${serviceName} ./backend/services/${serviceName}
 RUN pnpm --filter @health/db generate
 RUN pnpm --filter @health/db build
 RUN pnpm --filter @health/logger build
@@ -282,10 +282,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
-COPY --from=build /app/services/${serviceName}/dist ./services/${serviceName}/dist
-COPY --from=build /app/services/${serviceName}/package.json ./services/${serviceName}/
+COPY --from=build /app/backend/services/${serviceName}/dist ./backend/services/${serviceName}/dist
+COPY --from=build /app/backend/services/${serviceName}/package.json ./backend/services/${serviceName}/
 EXPOSE ${port}
-CMD ["node", "services/${serviceName}/dist/main.js"]
+CMD ["node", "backend/services/${serviceName}/dist/main.js"]
 `,
 );
 

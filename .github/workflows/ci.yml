@@ -149,19 +149,19 @@ jobs:
           - workspace: "@health/design-system"
             artifact: packages/design-system/src
           - workspace: "@health/web-admin"
-            artifact: apps/web-admin/.next
+            artifact: frontend/web-admin/.next
           - workspace: "@health/identity-service"
-            artifact: services/identity-service/dist
+            artifact: backend/services/identity-service/dist
           - workspace: "@health/tenant-service"
-            artifact: services/tenant-service/dist
+            artifact: backend/services/tenant-service/dist
           - workspace: "@health/patient-service"
-            artifact: services/patient-service/dist
+            artifact: backend/services/patient-service/dist
           - workspace: "@health/lims-service"
-            artifact: services/lims-service/dist
+            artifact: backend/services/lims-service/dist
           - workspace: "@health/audit-service"
-            artifact: services/audit-service/dist
+            artifact: backend/services/audit-service/dist
           - workspace: "@health/api-gateway"
-            artifact: apps/api-gateway/dist
+            artifact: backend/api-gateway/dist
     steps:
       - uses: actions/checkout@v4
 
@@ -178,7 +178,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Generate Prisma client
-        if: contains(matrix.artifact, 'services/') || matrix.workspace == '@health/db'
+        if: contains(matrix.artifact, 'backend/services/') || matrix.workspace == '@health/db'
         run: pnpm --filter @health/db generate
 
       - name: Build
@@ -220,7 +220,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.service == 'api-gateway' && 'apps/api-gateway/Dockerfile' || matrix.service == 'web-admin' && 'apps/web-admin/Dockerfile' || format('services/{0}/Dockerfile', matrix.service) }}
+          file: ${{ matrix.service == 'api-gateway' && 'backend/api-gateway/Dockerfile' || matrix.service == 'web-admin' && 'frontend/web-admin/Dockerfile' || format('backend/services/{0}/Dockerfile', matrix.service) }}
           push: false
           tags: healthecosystem/${{ matrix.service }}:${{ github.sha }}
           build-args: |

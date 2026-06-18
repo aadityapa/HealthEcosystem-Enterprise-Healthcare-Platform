@@ -4,30 +4,17 @@
 
 ```
 health-ecosystem/
-├── apps/                           # Frontend applications
-│   ├── admin-portal/               # Next.js 15 — Admin & branch management
-│   ├── doctor-portal/              # Next.js 15 — Doctor portal
-│   ├── lab-workstation/            # Next.js 15 — Lab technician UI
-│   ├── patient-app/                # Next.js 15 — Patient mobile web app
-│   ├── franchise-dashboard/        # Next.js 15 — Franchise management
-│   └── corporate-portal/           # Next.js 15 — Corporate client portal
+├── backend/                        # Backend (NestJS)
+│   ├── api-gateway/                # API Gateway (:3000)
+│   └── services/                   # Microservices (:3001–:3030)
 │
-├── services/                       # Backend microservices (NestJS)
-│   ├── api-gateway/
-│   ├── auth-service/
-│   ├── tenant-service/
-│   ├── patient-service/
-│   ├── lims-service/
-│   ├── device-service/
-│   ├── ehr-service/
-│   ├── pms-service/
-│   ├── billing-service/
-│   ├── collection-service/
-│   ├── notification-service/
-│   ├── report-service/
-│   ├── ai-analytics-service/
-│   ├── integration-service/
-│   └── search-service/
+├── frontend/                       # Frontend applications (Next.js)
+│   ├── web-admin/                  # Admin portal (:3100)
+│   ├── patient-mobile/             # Patient app (:3110)
+│   ├── phlebotomist-app/           # Field collection (:3120)
+│   └── partner-portal/             # Partner portal (:3130)
+│
+├── packages/                       # Shared libraries
 │
 ├── packages/                       # Shared libraries
 │   ├── ui/                         # Shadcn UI + Stitch design system

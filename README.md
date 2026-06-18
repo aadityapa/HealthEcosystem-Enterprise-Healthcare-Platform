@@ -214,13 +214,14 @@ Full architecture and implementation docs: **[docs/README.md](./docs/README.md)*
 
 ```
 HealthEcosystem/
-├── apps/
+├── backend/
 │   ├── api-gateway/              # API Gateway (:3000)
+│   └── services/                 # 31 NestJS microservices (:3001–:3030)
+├── frontend/
 │   ├── web-admin/                # Admin Portal (:3100)
 │   ├── patient-mobile/           # Patient app (:3110)
 │   ├── phlebotomist-app/         # Field collection (:3120)
 │   └── partner-portal/           # Partner portal (:3130)
-├── services/                     # 31 NestJS microservices (:3001–:3030)
 ├── packages/
 │   ├── db/                       # Prisma — 27 schemas
 │   ├── design-system/            # UI components & tokens

@@ -182,7 +182,7 @@ services:
   identity-service:
     build:
       context: .
-      dockerfile: services/identity-service/Dockerfile
+      dockerfile: backend/services/identity-service/Dockerfile
     container_name: health-identity-service
     restart: unless-stopped
     logging: *default-logging
@@ -206,7 +206,7 @@ services:
   tenant-service:
     build:
       context: .
-      dockerfile: services/tenant-service/Dockerfile
+      dockerfile: backend/services/tenant-service/Dockerfile
     container_name: health-tenant-service
     restart: unless-stopped
     logging: *default-logging
@@ -230,7 +230,7 @@ services:
   patient-service:
     build:
       context: .
-      dockerfile: services/patient-service/Dockerfile
+      dockerfile: backend/services/patient-service/Dockerfile
     container_name: health-patient-service
     restart: unless-stopped
     logging: *default-logging
@@ -256,7 +256,7 @@ services:
   lims-service:
     build:
       context: .
-      dockerfile: services/lims-service/Dockerfile
+      dockerfile: backend/services/lims-service/Dockerfile
     container_name: health-lims-service
     restart: unless-stopped
     logging: *default-logging
@@ -282,7 +282,7 @@ services:
   audit-service:
     build:
       context: .
-      dockerfile: services/audit-service/Dockerfile
+      dockerfile: backend/services/audit-service/Dockerfile
     container_name: health-audit-service
     restart: unless-stopped
     logging: *default-logging
@@ -306,7 +306,7 @@ services:
   device-service:
     build:
       context: .
-      dockerfile: services/device-service/Dockerfile
+      dockerfile: backend/services/device-service/Dockerfile
     container_name: health-device-service
     restart: unless-stopped
     logging: *default-logging
@@ -334,7 +334,7 @@ services:
   master-data-service:
     build:
       context: .
-      dockerfile: services/master-data-service/Dockerfile
+      dockerfile: backend/services/master-data-service/Dockerfile
     container_name: health-master-data-service
     restart: unless-stopped
     logging: *default-logging
@@ -358,7 +358,7 @@ services:
   billing-service:
     build:
       context: .
-      dockerfile: services/billing-service/Dockerfile
+      dockerfile: backend/services/billing-service/Dockerfile
     container_name: health-billing-service
     restart: unless-stopped
     logging: *default-logging
@@ -392,7 +392,7 @@ services:
   inventory-service:
     build:
       context: .
-      dockerfile: services/inventory-service/Dockerfile
+      dockerfile: backend/services/inventory-service/Dockerfile
     container_name: health-inventory-service
     restart: unless-stopped
     logging: *default-logging
@@ -416,7 +416,7 @@ services:
   qc-service:
     build:
       context: .
-      dockerfile: services/qc-service/Dockerfile
+      dockerfile: backend/services/qc-service/Dockerfile
     container_name: health-qc-service
     restart: unless-stopped
     logging: *default-logging
@@ -440,7 +440,7 @@ services:
   crm-service:
     build:
       context: .
-      dockerfile: services/crm-service/Dockerfile
+      dockerfile: backend/services/crm-service/Dockerfile
     container_name: health-crm-service
     restart: unless-stopped
     logging: *default-logging
@@ -464,7 +464,7 @@ services:
   ehr-service:
     build:
       context: .
-      dockerfile: services/ehr-service/Dockerfile
+      dockerfile: backend/services/ehr-service/Dockerfile
     container_name: health-ehr-service
     restart: unless-stopped
     logging: *default-logging
@@ -490,7 +490,7 @@ services:
   abdm-service:
     build:
       context: .
-      dockerfile: services/abdm-service/Dockerfile
+      dockerfile: backend/services/abdm-service/Dockerfile
     container_name: health-abdm-service
     restart: unless-stopped
     logging: *default-logging
@@ -516,7 +516,7 @@ services:
   analytics-service:
     build:
       context: .
-      dockerfile: services/analytics-service/Dockerfile
+      dockerfile: backend/services/analytics-service/Dockerfile
     container_name: health-analytics-service
     restart: unless-stopped
     logging: *default-logging
@@ -544,7 +544,7 @@ services:
   ai-service:
     build:
       context: .
-      dockerfile: services/ai-service/Dockerfile
+      dockerfile: backend/services/ai-service/Dockerfile
     container_name: health-ai-service
     restart: unless-stopped
     logging: *default-logging
@@ -568,7 +568,7 @@ services:
   field-service:
     build:
       context: .
-      dockerfile: services/field-service/Dockerfile
+      dockerfile: backend/services/field-service/Dockerfile
     container_name: health-field-service
     restart: unless-stopped
     logging: *default-logging
@@ -592,7 +592,7 @@ services:
   radiology-service:
     build:
       context: .
-      dockerfile: services/radiology-service/Dockerfile
+      dockerfile: backend/services/radiology-service/Dockerfile
     container_name: health-radiology-service
     restart: unless-stopped
     logging: *default-logging
@@ -618,7 +618,7 @@ services:
   hrms-service:
     build:
       context: .
-      dockerfile: services/hrms-service/Dockerfile
+      dockerfile: backend/services/hrms-service/Dockerfile
     container_name: health-hrms-service
     restart: unless-stopped
     logging: *default-logging
@@ -642,7 +642,7 @@ services:
   marketplace-service:
     build:
       context: .
-      dockerfile: services/marketplace-service/Dockerfile
+      dockerfile: backend/services/marketplace-service/Dockerfile
     container_name: health-marketplace-service
     restart: unless-stopped
     logging: *default-logging
@@ -666,7 +666,7 @@ services:
   observability-service:
     build:
       context: .
-      dockerfile: services/observability-service/Dockerfile
+      dockerfile: backend/services/observability-service/Dockerfile
     container_name: health-observability-service
     restart: unless-stopped
     logging: *default-logging
@@ -695,7 +695,7 @@ services:
   data-platform-service:
     build:
       context: .
-      dockerfile: services/data-platform-service/Dockerfile
+      dockerfile: backend/services/data-platform-service/Dockerfile
     container_name: health-data-platform-service
     restart: unless-stopped
     logging: *default-logging
@@ -726,7 +726,7 @@ services:
   workflow-service:
     build:
       context: .
-      dockerfile: services/workflow-service/Dockerfile
+      dockerfile: backend/services/workflow-service/Dockerfile
     container_name: health-workflow-service
     restart: unless-stopped
     logging: *default-logging
@@ -750,7 +750,7 @@ services:
   dms-service:
     build:
       context: .
-      dockerfile: services/dms-service/Dockerfile
+      dockerfile: backend/services/dms-service/Dockerfile
     container_name: health-dms-service
     restart: unless-stopped
     logging: *default-logging
@@ -778,7 +778,7 @@ services:
   branding-service:
     build:
       context: .
-      dockerfile: services/branding-service/Dockerfile
+      dockerfile: backend/services/branding-service/Dockerfile
     container_name: health-branding-service
     restart: unless-stopped
     logging: *default-logging
@@ -802,7 +802,7 @@ services:
   agents-service:
     build:
       context: .
-      dockerfile: services/agents-service/Dockerfile
+      dockerfile: backend/services/agents-service/Dockerfile
     container_name: health-agents-service
     restart: unless-stopped
     logging: *default-logging
@@ -826,7 +826,7 @@ services:
   i18n-service:
     build:
       context: .
-      dockerfile: services/i18n-service/Dockerfile
+      dockerfile: backend/services/i18n-service/Dockerfile
     container_name: health-i18n-service
     restart: unless-stopped
     logging: *default-logging
@@ -850,7 +850,7 @@ services:
   security-service:
     build:
       context: .
-      dockerfile: services/security-service/Dockerfile
+      dockerfile: backend/services/security-service/Dockerfile
     container_name: health-security-service
     restart: unless-stopped
     logging: *default-logging
@@ -874,7 +874,7 @@ services:
   compliance-service:
     build:
       context: .
-      dockerfile: services/compliance-service/Dockerfile
+      dockerfile: backend/services/compliance-service/Dockerfile
     container_name: health-compliance-service
     restart: unless-stopped
     logging: *default-logging
@@ -898,7 +898,7 @@ services:
   customer-success-service:
     build:
       context: .
-      dockerfile: services/customer-success-service/Dockerfile
+      dockerfile: backend/services/customer-success-service/Dockerfile
     container_name: health-customer-success-service
     restart: unless-stopped
     logging: *default-logging
@@ -922,7 +922,7 @@ services:
   commercial-service:
     build:
       context: .
-      dockerfile: services/commercial-service/Dockerfile
+      dockerfile: backend/services/commercial-service/Dockerfile
     container_name: health-commercial-service
     restart: unless-stopped
     logging: *default-logging
@@ -946,7 +946,7 @@ services:
   api-gateway:
     build:
       context: .
-      dockerfile: apps/api-gateway/Dockerfile
+      dockerfile: backend/api-gateway/Dockerfile
     container_name: health-api-gateway
     restart: unless-stopped
     logging: *default-logging
@@ -1060,7 +1060,7 @@ services:
   web-admin:
     build:
       context: .
-      dockerfile: apps/web-admin/Dockerfile
+      dockerfile: frontend/web-admin/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:3000
     container_name: health-web-admin
@@ -1079,7 +1079,7 @@ services:
   patient-mobile:
     build:
       context: .
-      dockerfile: apps/patient-mobile/Dockerfile
+      dockerfile: frontend/patient-mobile/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:3000
     container_name: health-patient-mobile
@@ -1098,7 +1098,7 @@ services:
   phlebotomist-app:
     build:
       context: .
-      dockerfile: apps/phlebotomist-app/Dockerfile
+      dockerfile: frontend/phlebotomist-app/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:3000
     container_name: health-phlebotomist-app
@@ -1117,7 +1117,7 @@ services:
   partner-portal:
     build:
       context: .
-      dockerfile: apps/partner-portal/Dockerfile
+      dockerfile: frontend/partner-portal/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: http://localhost:3000
     container_name: health-partner-portal
