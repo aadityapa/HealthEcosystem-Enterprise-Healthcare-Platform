@@ -129,7 +129,7 @@ Get-Content .env | ForEach-Object {
     Set-Item -Path "env:$($matches[1].Trim())" -Value $matches[2].Trim()
   }
 }
-pnpm turbo run dev --concurrency=35
+pnpm dev
 
 # Start web admin (separate terminal)
 pnpm --filter @health/web-admin dev

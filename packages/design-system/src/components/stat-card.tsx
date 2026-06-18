@@ -1,4 +1,3 @@
-import * as React from 'react';
 import { TrendingDown, TrendingUp, type LucideIcon } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Card, CardContent } from './card';

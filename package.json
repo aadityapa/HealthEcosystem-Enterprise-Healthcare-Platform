@@ -5,7 +5,11 @@
   "description": "Enterprise Healthcare SaaS Platform — LIMS, EHR, PMS, Billing",
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev --concurrency=35",
+    "dev": "node scripts/start-dev.mjs",
+    "dev:full": "node scripts/start-dev.mjs --full",
+    "dev:mobile": "node scripts/start-dev.mjs --mobile",
+    "dev:local": "node scripts/start-dev.mjs --local",
+    "dev:stop": "node scripts/stop-dev.mjs",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "type-check": "turbo run type-check",

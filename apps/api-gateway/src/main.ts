@@ -32,7 +32,8 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig));
 
   const port = configService.get<number>('port', 3000);
-  await app.listen(port);
+  const host = process.env.HOST ?? '0.0.0.0';
+  await app.listen(port, host);
   logger.info(`API gateway running on port ${port}`);
 }
 

@@ -16,6 +16,12 @@ export class TenantContextInterceptor implements NestInterceptor {
     next: CallHandler,
   ): Promise<Observable<unknown>> {
     const request = context.switchToHttp().getRequest();
+    const path = request.path as string;
+
+    if (path.includes('/health')) {
+      return next.handle();
+    }
+
     const tenantId = request.headers[TENANT_HEADERS.tenantId] as string | undefined;
     const organizationId = request.headers[TENANT_HEADERS.organizationId] as
       | string
